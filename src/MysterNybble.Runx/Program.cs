@@ -2,5 +2,8 @@ namespace MysterNybble.Runx;
 
 internal static class Program
 {
-    private static int Main(string[] args) => RunxCli.Run(args, Console.Out, Console.Error);
+    private static async Task<int> Main(string[] args)
+    {
+        return await RunxCli.RunAsync(args, Console.Out, Console.Error, CancellationToken.None);
+    }
 }
