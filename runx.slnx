@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MysterNybble.Runx/MysterNybble.Runx.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MysterNybble.Runx.Tests/MysterNybble.Runx.Tests.csproj" />
+  </Folder>
+</Solution>
