@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+  "title": "runx configuration",
+  "description": "Task definitions for the runx repo command runner.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "tasks"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON schema reference for editor tooling."
+    },
+    "version": {
+      "const": 1,
+      "description": "Config format version. Must be 1."
+    },
+    "taskFolders": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "\\S" },
+      "description": "Folders to discover script tasks in, replacing the default eng/tasks. Relative to this file, or to the repo root in personal files. An empty array turns discovery off."
+    },
+    "tasks": {
+      "type": "object",
+      "description": "Tasks keyed by name. Run a task with 'runx <name>'.",
+      "propertyNames": { "$ref": "#/$defs/taskName" },
+      "additionalProperties": { "$ref": "#/$defs/task" }
+    }
+  },
+  "$defs": {
+    "taskName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:][A-Za-z0-9_.:-]*$"
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Shown by 'runx --list' and the task picker."
+        },
+        "command": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Executable to launch directly, without a shell. Bare names are looked up on PATH; relative paths resolve from the task's cwd."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments for 'command'. Arguments after 'runx <task> --' are appended."
+        },
+        "script": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Script text to run with 'shell'. Multi-line cmd scripts run as a temporary batch file."
+        },
+        "shell": {
+          "enum": ["cmd", "pwsh", "sh"],
+          "description": "Shell used to run 'script'."
+        },
+        "cwd": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Working directory, relative to the directory containing runx.json. Defaults to that directory."
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables added to the task's process.",
+          "propertyNames": { "pattern": "^[^=]*[^=\\s][^=]*$" },
+          "additionalProperties": { "type": "string" }
+        },
+        "hide": {
+          "type": "boolean",
+          "description": "Leave the task out of the picker and 'runx --list'. It still runs by name and as a dependency."
+        },
+        "dependsOn": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/taskName" },
+          "description": "Tasks to run first, in order. Each task runs at most once per invocation. A task with only 'dependsOn' just runs its dependencies."
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["command"],
+          "not": {
+            "anyOf": [
+              { "required": ["script"] },
+              { "required": ["shell"] }
+            ]
+          }
+        },
+        {
+          "required": ["script", "shell"],
+          "not": {
+            "anyOf": [
+              { "required": ["command"] },
+              { "required": ["args"] }
+            ]
+          }
+        },
+        {
+          "required": ["dependsOn"],
+          "not": {
+            "anyOf": [
+              { "required": ["command"] },
+              { "required": ["script"] },
+              { "required": ["shell"] },
+              { "required": ["args"] },
+              { "required": ["cwd"] },
+              { "required": ["env"] }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

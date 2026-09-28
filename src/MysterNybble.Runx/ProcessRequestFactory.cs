@@ -7,6 +7,12 @@ internal static class ProcessRequestFactory
         return shell is "cmd" or "pwsh" or "sh";
     }
 
+    public static bool IsRunnable(RunxTask task)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        return task.Command is not null || task.Script is not null;
+    }
+
     public static ProcessRequestBuildResult Build(
         LoadedRunxConfig config,
         string taskName,
@@ -18,10 +24,16 @@ internal static class ProcessRequestFactory
         ArgumentNullException.ThrowIfNull(task);
         ArgumentNullException.ThrowIfNull(passthroughArguments);
 
-        string workingDirectory = ResolveWorkingDirectory(config.Directory, task.Cwd);
+        TaskSource source = config.Sources[taskName];
+        string? workingDirectory = ResolveWorkingDirectory(source.BaseDirectory, task.Cwd);
+        if (workingDirectory is null)
+        {
+            return ProcessRequestBuildResult.Failed($"Task '{taskName}' cwd '{task.Cwd}' is not a valid path.");
+        }
+
         Dictionary<string, string> environment = BuildEnvironment(task);
 
-        if (!string.IsNullOrWhiteSpace(task.Command))
+        if (task.Command is not null)
         {
             List<string> arguments = [];
             if (task.Args is not null)
@@ -39,7 +51,7 @@ internal static class ProcessRequestFactory
             return new ProcessRequestBuildResult(
                 new ProcessRequest(
                     taskName,
-                    config.Path,
+                    source.ConfigPath,
                     "process",
                     task.Command,
                     arguments,
@@ -54,7 +66,7 @@ internal static class ProcessRequestFactory
                 $"Task '{taskName}' is a shell task. Argument passthrough is only supported for command tasks.");
         }
 
-        if (string.IsNullOrWhiteSpace(task.Shell) || string.IsNullOrWhiteSpace(task.Script))
+        if (task.Shell is null || task.Script is null)
         {
             return ProcessRequestBuildResult.Failed($"Task '{taskName}' is not executable.");
         }
@@ -63,20 +75,32 @@ internal static class ProcessRequestFactory
         return new ProcessRequestBuildResult(
             new ProcessRequest(
                 taskName,
-                config.Path,
+                source.ConfigPath,
                 $"shell:{task.Shell}",
                 shellInvocation.FileName,
                 shellInvocation.Arguments,
                 workingDirectory,
-                environment),
+                environment,
+                shellInvocation.VerbatimArguments,
+                shellInvocation.BatchFileContents),
             Errors: []);
     }
 
-    private static string ResolveWorkingDirectory(string configDirectory, string? taskCwd)
+    private static string? ResolveWorkingDirectory(string configDirectory, string? taskCwd)
     {
-        return string.IsNullOrWhiteSpace(taskCwd)
-            ? configDirectory
-            : Path.GetFullPath(taskCwd, configDirectory);
+        if (string.IsNullOrWhiteSpace(taskCwd))
+        {
+            return configDirectory;
+        }
+
+        try
+        {
+            return Path.GetFullPath(taskCwd, configDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
     private static Dictionary<string, string> BuildEnvironment(RunxTask task)
@@ -102,12 +126,38 @@ internal static class ProcessRequestFactory
     {
         return shell switch
         {
-            "cmd" => new ShellInvocation("cmd.exe", ["/d", "/s", "/c", script]),
-            "pwsh" => new ShellInvocation("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]),
+            "cmd" => GetCmdInvocation(script),
+            "pwsh" => new ShellInvocation("pwsh", ["-NoLogo", "-NoProfile", "-Command", script]),
             "sh" => new ShellInvocation("sh", ["-c", script]),
             _ => throw new InvalidOperationException($"Unsupported shell '{shell}'.")
         };
     }
 
-    private sealed record ShellInvocation(string FileName, IReadOnlyList<string> Arguments);
+    private static ShellInvocation GetCmdInvocation(string script)
+    {
+        // cmd /c only runs the first line of a command line, so multi-line scripts run as a temporary
+        // batch file that the process runner writes just before it starts cmd.exe.
+        if (script.Contains('\n', StringComparison.Ordinal) || script.Contains('\r', StringComparison.Ordinal))
+        {
+            string[] lines = script.ReplaceLineEndings("\n").Split('\n');
+            string contents = string.Join("\r\n", ["@echo off", .. lines]) + "\r\n";
+            return new ShellInvocation(
+                WindowsCommandLine.CmdPath,
+                [.. WindowsCommandLine.CmdSwitches, "\"<temporary batch file>\""],
+                BatchFileContents: contents);
+        }
+
+        // cmd.exe does not understand the backslash-escaped quotes used for normal arguments, so a
+        // one-line script goes through verbatim inside the quotes that /s strips.
+        return new ShellInvocation(
+            WindowsCommandLine.CmdPath,
+            [.. WindowsCommandLine.CmdSwitches, $"\"{script}\""],
+            VerbatimArguments: true);
+    }
+
+    private sealed record ShellInvocation(
+        string FileName,
+        IReadOnlyList<string> Arguments,
+        bool VerbatimArguments = false,
+        string? BatchFileContents = null);
 }

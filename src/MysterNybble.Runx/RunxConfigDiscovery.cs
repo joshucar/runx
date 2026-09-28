@@ -78,7 +78,7 @@ internal static class RunxConfigDiscovery
         return null;
     }
 
-    private static string? FindGitRoot(string startDirectory)
+    public static string? FindGitRoot(string startDirectory)
     {
         DirectoryInfo? current = new(startDirectory);
         while (current is not null)

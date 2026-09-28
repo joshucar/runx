@@ -7,7 +7,9 @@ internal sealed record ProcessRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
     string WorkingDirectory,
-    IReadOnlyDictionary<string, string> Environment);
+    IReadOnlyDictionary<string, string> Environment,
+    bool VerbatimArguments = false,
+    string? BatchFileContents = null);
 
 internal sealed record ProcessRequestBuildResult(ProcessRequest? Request, IReadOnlyList<string> Errors)
 {

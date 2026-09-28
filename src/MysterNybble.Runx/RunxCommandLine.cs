@@ -43,15 +43,18 @@ internal static class RunxCommandLine
         bool force = parseResult.GetValue(commandLine.ForceOption);
         bool allowParentSearch = parseResult.GetValue(commandLine.AllowParentSearchOption);
         bool dryRun = parseResult.GetValue(commandLine.DryRunOption);
+        bool personal = parseResult.GetValue(commandLine.PersonalOption);
+        bool where = parseResult.GetValue(commandLine.WhereOption);
+        string? scope = parseResult.GetValue(commandLine.ScopeOption);
 
         List<string> errors = [];
-        int actionCount = CountTrue(list, init);
+        int actionCount = CountTrue(list, init, where);
         if (actionCount > 1)
         {
             errors.Add("Only one tool action can be used at a time.");
         }
 
-        if (taskName is not null && (list || init))
+        if (taskName is not null && (list || init || where))
         {
             errors.Add("Tool action flags cannot be combined with a task name.");
         }
@@ -77,14 +80,19 @@ internal static class RunxCommandLine
             DryRun: dryRun,
             TaskName: taskName,
             TaskArguments: taskArguments,
-            Errors: []);
+            Errors: [])
+        {
+            Personal = personal,
+            Where = where,
+            Scope = scope
+        };
     }
 
     private static CommandLineModel CreateCommandLineModel()
     {
         Option<bool> listOption = new("--list")
         {
-            Description = "List tasks from runx.json."
+            Description = "List tasks without prompting."
         };
 
         Option<bool> initOption = new("--init")
@@ -112,6 +120,21 @@ internal static class RunxCommandLine
             Description = "Print the resolved task without executing it."
         };
 
+        Option<bool> personalOption = new("--personal")
+        {
+            Description = "With --init, create your personal tasks file for this repo."
+        };
+
+        Option<bool> whereOption = new("--where")
+        {
+            Description = "Show which task files apply here."
+        };
+
+        Option<string?> scopeOption = new("--scope")
+        {
+            Description = "With --init --personal: global, a remote such as origin, or repo (the default)."
+        };
+
         Argument<string?> taskArgument = new("task")
         {
             Arity = ArgumentArity.ZeroOrOne,
@@ -125,6 +148,9 @@ internal static class RunxCommandLine
         rootCommand.Options.Add(fileOption);
         rootCommand.Options.Add(allowParentSearchOption);
         rootCommand.Options.Add(dryRunOption);
+        rootCommand.Options.Add(personalOption);
+        rootCommand.Options.Add(whereOption);
+        rootCommand.Options.Add(scopeOption);
         rootCommand.Arguments.Add(taskArgument);
 
         return new CommandLineModel(
@@ -135,6 +161,9 @@ internal static class RunxCommandLine
             fileOption,
             allowParentSearchOption,
             dryRunOption,
+            personalOption,
+            whereOption,
+            scopeOption,
             taskArgument);
     }
 
@@ -192,6 +221,9 @@ internal sealed record CommandLineModel(
     Option<string?> FileOption,
     Option<bool> AllowParentSearchOption,
     Option<bool> DryRunOption,
+    Option<bool> PersonalOption,
+    Option<bool> WhereOption,
+    Option<string?> ScopeOption,
     Argument<string?> TaskArgument);
 
 internal sealed record CliParseResult(
@@ -207,6 +239,12 @@ internal sealed record CliParseResult(
     IReadOnlyList<string> TaskArguments,
     IReadOnlyList<string> Errors)
 {
+    public bool Personal { get; init; }
+
+    public bool Where { get; init; }
+
+    public string? Scope { get; init; }
+
     public static CliParseResult Help()
     {
         return new CliParseResult(
