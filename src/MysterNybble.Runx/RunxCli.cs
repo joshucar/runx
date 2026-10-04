@@ -81,10 +81,16 @@ internal static class RunxCli
             return 0;
         }
 
-        if (parseResult.DryRun && parseResult.Init)
+        if (GetOptionError(parseResult) is string optionError)
         {
-            error.WriteLine("--dry-run can only be used with a task.");
+            error.WriteLine(optionError);
+            error.WriteLine("Run 'runx --help' for usage.");
             return 1;
+        }
+
+        if (parseResult.InstallSkill)
+        {
+            return RunxGuide.InstallSkill(RunxGuide.GetDefaultClaudeDirectory(), output, error);
         }
 
         if (parseResult.Scope is not null && !(parseResult.Init && parseResult.Personal))
@@ -103,12 +109,6 @@ internal static class RunxCli
         if (parseResult.Personal)
         {
             error.WriteLine("--personal can only be used with --init.");
-            return 1;
-        }
-
-        if (parseResult.Force)
-        {
-            error.WriteLine("--force can only be used with --init.");
             return 1;
         }
 
@@ -140,18 +140,39 @@ internal static class RunxCli
             ? RunxConfigDiscovery.FindGitRoot(fullCurrentDirectory) ?? fullCurrentDirectory
             : null;
 
-        if (parseResult.Where)
+        if (parseResult.Where || parseResult.Guide)
         {
-            ConfigLoadResult whereResult = await RunxConfigLoader.LoadAsync(searchResult.ConfigPath, personalFiles, scriptRoot, cancellationToken);
-            WriteWhere(searchResult, personal, personalTasks, whereResult.Config, parseResult.FilePath is not null, currentDirectory, output);
+            ConfigLoadResult result = await RunxConfigLoader.LoadAsync(searchResult.ConfigPath, personalFiles, scriptRoot, cancellationToken);
+            if (parseResult.Where)
+            {
+                WriteWhere(searchResult, personal, personalTasks, result.Config, parseResult.FilePath is not null, currentDirectory, output);
+            }
+            else
+            {
+                string? gitRoot = RunxConfigDiscovery.FindGitRoot(fullCurrentDirectory);
+                RunxGuide.Write(output, gitRoot ?? fullCurrentDirectory, gitRoot is not null, searchResult.ConfigPath, result);
+            }
+
             return 0;
         }
 
-        // With no config files, only the default task folder can hold tasks.
+        // With no config files, only the default task folder can hold tasks. --new creates the first one.
         bool hasDefaultTaskFolder = scriptRoot is not null
             && Directory.Exists(Path.Combine(scriptRoot, ScriptTasks.DefaultFolder));
 
-        if (searchResult.ConfigPath is null && personalFiles.Count == 0 && !hasDefaultTaskFolder)
+        bool nothingFound = searchResult.ConfigPath is null && personalFiles.Count == 0 && !hasDefaultTaskFolder;
+        if (nothingFound && parseResult.Check)
+        {
+            return TaskReports.WriteCheck(new ConfigLoadResult(Config: null, Errors: []), nothingFound: true, parseResult.Json, output);
+        }
+
+        if (nothingFound && parseResult.List && parseResult.Json)
+        {
+            TaskReports.WriteJsonList(config: null, output);
+            return 0;
+        }
+
+        if (nothingFound && parseResult.NewTaskName is null)
         {
             if (parseResult.TaskName is null && !parseResult.List && parseResult.FilePath is null)
             {
@@ -168,6 +189,11 @@ internal static class RunxCli
         }
 
         ConfigLoadResult loadResult = await RunxConfigLoader.LoadAsync(searchResult.ConfigPath, personalFiles, scriptRoot, cancellationToken);
+        if (parseResult.Check)
+        {
+            return TaskReports.WriteCheck(loadResult, nothingFound: false, parseResult.Json, output);
+        }
+
         if (loadResult.Errors.Count > 0 || loadResult.Config is null)
         {
             foreach (string loadError in loadResult.Errors)
@@ -176,6 +202,22 @@ internal static class RunxCli
             }
 
             return 1;
+        }
+
+        if (parseResult.NewTaskName is not null)
+        {
+            return await TaskScaffolder.CreateAsync(parseResult, loadResult.Config, scriptRoot!, output, error, cancellationToken);
+        }
+
+        if (parseResult.InfoTaskName is not null)
+        {
+            return TaskReports.WriteInfo(loadResult.Config, parseResult.InfoTaskName, parseResult.Json, output, error);
+        }
+
+        if (parseResult.List && parseResult.Json)
+        {
+            TaskReports.WriteJsonList(loadResult.Config, output);
+            return 0;
         }
 
         string? taskName = parseResult.TaskName;
@@ -296,9 +338,56 @@ internal static class RunxCli
         output.WriteLine("  --scope <scope>         With --init --personal: global, a remote such as origin, or repo.");
         output.WriteLine("  --force                 Overwrite an existing file with --init.");
         output.WriteLine("  --where                 Show which task files apply here.");
+        output.WriteLine("  --new <name>            Create a script task in the task folder (eng/tasks by default).");
+        output.WriteLine("    --type <type>         ps1 (the default), cs, sh, or cmd.");
+        output.WriteLine("    --description <text>  The task's description.");
+        output.WriteLine("    --depends <task>      A task to run first. Repeat or comma-separate.");
+        output.WriteLine("    --hide                Keep the task out of the picker and --list.");
+        output.WriteLine("  --info <task>           Describe a task: what it runs, where it comes from, its plan.");
+        output.WriteLine("  --check                 Validate all tasks without running anything.");
+        output.WriteLine("  --json                  With --list, --info, or --check, write JSON.");
+        output.WriteLine("  --guide                 Explain how to add tasks, for people and AI agents.");
+        output.WriteLine("  --install-skill         Install the runx skill for Claude Code.");
         output.WriteLine("  --file <path>           Use an explicit runx.json path.");
         output.WriteLine("  --allow-parent-search   Allow config discovery beyond the safe search boundary.");
         output.WriteLine("  --dry-run               Print the resolved task without executing it.");
+        output.WriteLine();
+        output.WriteLine("Run 'runx --guide' to learn how to add tasks.");
+    }
+
+    // Options that only mean something alongside another one.
+    private static string? GetOptionError(CliParseResult parseResult)
+    {
+        bool reports = parseResult.List || parseResult.Check || parseResult.InfoTaskName is not null;
+        bool creating = parseResult.NewTaskName is not null;
+
+        if (parseResult.DryRun && (parseResult.Init || parseResult.Where || parseResult.Guide || parseResult.InstallSkill
+            || parseResult.Check || creating || parseResult.InfoTaskName is not null))
+        {
+            return "--dry-run can only be used with a task.";
+        }
+
+        if (parseResult.Json && !reports)
+        {
+            return "--json can only be used with --list, --info, or --check.";
+        }
+
+        if (!creating && (parseResult.ScriptType is not null || parseResult.Description is not null || parseResult.Depends.Count > 0 || parseResult.Hide))
+        {
+            return "--type, --description, --depends, and --hide can only be used with --new.";
+        }
+
+        if (parseResult.Force && !parseResult.Init && !creating)
+        {
+            return "--force can only be used with --init or --new.";
+        }
+
+        if (creating && parseResult.FilePath is not null)
+        {
+            return "--new cannot be combined with --file.";
+        }
+
+        return null;
     }
 
     private static void WriteTaskList(LoadedRunxConfig config, TextWriter output)

@@ -103,6 +103,29 @@ exit code. On Windows, `.cmd` and `.bat` commands receive their arguments
 escaped for `cmd.exe`, so characters such as `&`, `|`, `%`, and `"` arrive
 intact instead of being interpreted.
 
+## For People and AI Agents
+
+```powershell
+runx --guide            # how to add tasks, plus where they go in this repo
+runx --check            # validate everything without running anything
+runx --info <task>      # what a task runs, where it comes from, its plan
+runx --list --json      # every task, including hidden ones, as JSON
+runx --install-skill    # install the runx skill for Claude Code
+```
+
+`--guide` is built into the tool, so it always matches the installed version,
+and it ends with details for the current repo, such as where new scripts go.
+`--check` also warns about scripts that were skipped and header mistakes such
+as a misspelled key, and `--check --json` and `--info <task> --json` give the
+same information as JSON.
+
+`runx --install-skill` writes `~/.claude/skills/runx/SKILL.md` (or under
+`CLAUDE_CONFIG_DIR`). Claude Code then uses it whenever it is asked to add or
+run tasks, and the skill tells it to start with `runx --guide`, so a fresh
+session can handle "add a runx task that does X" without further
+instructions. Run it again after updating runx; it reports when the skill is
+already up to date.
+
 ## Usage
 
 ```powershell
@@ -132,7 +155,19 @@ config file or `--allow-parent-search` to permit walking beyond that boundary.
 
 ## Script Tasks
 
-Scripts in a repo's `eng/tasks/` folder are tasks without any config.
+Scripts in a repo's `eng/tasks/` folder are tasks without any config. The
+quickest way to add one is `runx --new`, which creates the script with its
+header filled in and a TODO body that fails until you replace it:
+
+```powershell
+runx --new db:seed --type cs --description "Seed the local database" --depends build
+```
+
+`--type` is `ps1` (the default), `cs`, `sh`, or `cmd`, and `--hide` marks a
+helper task. `runx --new` refuses names that would not be discovered, names
+`runx.json` already uses, and dependencies that do not exist. Creating
+`build.sh` next to an existing `build.ps1` makes one task that runs the right
+script on each operating system.
 
 ```
 eng/tasks/

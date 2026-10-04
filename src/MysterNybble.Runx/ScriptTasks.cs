@@ -26,7 +26,17 @@ internal static class ScriptTasks
     // Comment markers for PowerShell and shell scripts, C#, and batch files.
     private static readonly string[] s_commentMarkers = ["#", "//", "::", "REM"];
 
-    public static IReadOnlyList<ScriptTask> Discover(string root, IReadOnlyList<string> folders, bool isWindows)
+    public static IReadOnlyList<string> ScriptExtensions { get; } = [".ps1", ".cs", ".sh", ".cmd", ".bat"];
+
+    public static IReadOnlyList<string> HeaderKeys { get; } = ["description", "depends", "hide"];
+
+    // Warnings, when given, collect problems that keep a script from being used as intended, such as
+    // an invalid name or a misspelled header key, for 'runx --check'.
+    public static IReadOnlyList<ScriptTask> Discover(
+        string root,
+        IReadOnlyList<string> folders,
+        bool isWindows,
+        List<string>? warnings = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(folders);
@@ -39,7 +49,17 @@ internal static class ScriptTasks
             foreach (string file in EnumerateScriptFiles(folder))
             {
                 string? name = GetTaskName(folder, file);
-                if (name is null || tasks.ContainsKey(name))
+                if (name is null)
+                {
+                    if (ScriptExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                    {
+                        warnings?.Add($"{ToCommandPath(root, file)} is not a task because its path does not make a valid task name. Use letters, digits, '_', '-', and '.'.");
+                    }
+
+                    continue;
+                }
+
+                if (tasks.ContainsKey(name))
                 {
                     continue;
                 }
@@ -55,7 +75,7 @@ internal static class ScriptTasks
                     continue;
                 }
 
-                folderTasks[name] = (runner.Rank, new ScriptTask(name, file, folder, CreateTask(file, runner)));
+                folderTasks[name] = (runner.Rank, new ScriptTask(name, file, folder, CreateTask(file, ToCommandPath(root, file), runner, warnings)));
             }
 
             foreach (KeyValuePair<string, (int Rank, ScriptTask Task)> task in folderTasks.OrderBy(static task => task.Key, StringComparer.Ordinal))
@@ -179,21 +199,41 @@ internal static class ScriptTasks
         return extension == ".SH" ? new ScriptRunner("sh", [path], isWindows ? 5 : 0) : null;
     }
 
-    private static RunxTask CreateTask(string file, ScriptRunner runner)
+    // displayPath names the script in warnings, relative to the repo root when it is inside the repo.
+    private static RunxTask CreateTask(string file, string displayPath, ScriptRunner runner, List<string>? warnings)
     {
-        Dictionary<string, object> header = ReadHeader(file);
+        Dictionary<string, object> header = ReadHeader(file, displayPath, warnings);
+        object? description = header.GetValueOrDefault("description");
+        object? depends = header.GetValueOrDefault("depends");
+        object? hide = header.GetValueOrDefault("hide");
+
+        if (description is not (null or string))
+        {
+            warnings?.Add($"{displayPath}: the header 'description' must be a quoted string.");
+        }
+
+        if (depends is not (null or string or List<string>))
+        {
+            warnings?.Add($"{displayPath}: the header 'depends' must be a quoted task name or a list such as [\"build\", \"test\"].");
+        }
+
+        if (hide is not (null or bool))
+        {
+            warnings?.Add($"{displayPath}: the header 'hide' must be true or false.");
+        }
+
         return new RunxTask
         {
-            Description = header.GetValueOrDefault("description") as string,
+            Description = description as string,
             Command = runner.Command,
             Args = [.. runner.Arguments],
-            DependsOn = header.GetValueOrDefault("depends") switch
+            DependsOn = depends switch
             {
                 string dependency => [dependency],
                 List<string> dependencies => [.. dependencies],
                 _ => null
             },
-            Hide = header.GetValueOrDefault("hide") as bool?
+            Hide = hide as bool?
         };
     }
 
@@ -228,7 +268,7 @@ internal static class ScriptTasks
 
     // Reads '# runx key=value' lines near the top of a script, with the comment marker for its language
     // ('#', '//', '::', or 'REM'). Values are quoted strings, true or false, or ["a", "b"] lists.
-    private static Dictionary<string, object> ReadHeader(string file)
+    private static Dictionary<string, object> ReadHeader(string file, string displayPath, List<string>? warnings)
     {
         Dictionary<string, object> header = new(StringComparer.Ordinal);
         IEnumerable<string> lines;
@@ -255,9 +295,19 @@ internal static class ScriptTasks
                 continue;
             }
 
+            if (!HeaderKeys.Contains(key, StringComparer.Ordinal))
+            {
+                warnings?.Add($"{displayPath}: unknown header key '{key}'. Known keys: {string.Join(", ", HeaderKeys)}.");
+                continue;
+            }
+
             if (TryParseValue(assignment[(equals + 1)..].Trim(), out object? value))
             {
                 header[key] = value;
+            }
+            else
+            {
+                warnings?.Add($"{displayPath}: the header value for '{key}' is not a quoted string, true or false, or a list.");
             }
         }
 

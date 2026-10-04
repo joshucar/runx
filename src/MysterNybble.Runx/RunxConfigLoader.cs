@@ -56,16 +56,20 @@ internal static class RunxConfigLoader
         }
 
         TaskFolderSettings? taskFolders = null;
+        List<string> warnings = [];
         if (scriptRoot is not null)
         {
             taskFolders = ResolveTaskFolders(scriptRoot, repo, personal);
-            foreach (ScriptTask script in ScriptTasks.Discover(scriptRoot, taskFolders.Folders, OperatingSystem.IsWindows()))
+            foreach (ScriptTask script in ScriptTasks.Discover(scriptRoot, taskFolders.Folders, OperatingSystem.IsWindows(), warnings))
             {
-                if (!tasks.ContainsKey(script.Name))
+                if (sources.TryGetValue(script.Name, out TaskSource? repoTask))
                 {
-                    tasks.Add(script.Name, script.Task);
-                    sources.Add(script.Name, new TaskSource(script.FilePath, scriptRoot, IsScript: true));
+                    warnings.Add($"{script.FilePath} is not used because {repoTask.ConfigPath} also defines '{script.Name}'.");
+                    continue;
                 }
+
+                tasks.Add(script.Name, script.Task);
+                sources.Add(script.Name, new TaskSource(script.FilePath, scriptRoot, IsScript: true));
             }
 
             locations.AddRange(taskFolders.Folders.Where(Directory.Exists));
@@ -95,7 +99,7 @@ internal static class RunxConfigLoader
         errors.AddRange(RunxConfigValidator.ValidateDependencies(tasks, sources, checkCycles: errors.Count == 0));
         if (errors.Count > 0)
         {
-            return new ConfigLoadResult(Config: null, errors);
+            return new ConfigLoadResult(Config: null, errors, warnings);
         }
 
         return new ConfigLoadResult(
@@ -106,7 +110,8 @@ internal static class RunxConfigLoader
                 unavailable,
                 personalFiles.Select(static file => Path.GetFullPath(file.Path)).ToArray(),
                 taskFolders),
-            Errors: []);
+            Errors: [],
+            warnings);
     }
 
     // The most specific file that sets taskFolders decides: the repo-level personal file, then the
@@ -243,7 +248,11 @@ internal static class RunxConfigLoader
     }
 }
 
-internal sealed record ConfigLoadResult(LoadedRunxConfig? Config, IReadOnlyList<string> Errors)
+// Warnings never stop a run; 'runx --check' reports them.
+internal sealed record ConfigLoadResult(
+    LoadedRunxConfig? Config,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<string>? Warnings = null)
 {
     public static ConfigLoadResult Failed(string error)
     {
