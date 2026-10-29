@@ -9,8 +9,7 @@ FAKE, MSBuild, or other heavier build systems.
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 PowerShell tasks also require [PowerShell 7](https://aka.ms/powershell).
 
-The first NuGet release, `1.0.0-beta.1`, is being prepared. Until it is
-published, use [Install From Source](#install-from-source). Once published:
+Install the beta from NuGet:
 
 ```powershell
 dotnet tool install --global MysterNybble.Runx --version 1.0.0-beta.1
