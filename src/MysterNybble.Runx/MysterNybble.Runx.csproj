@@ -9,9 +9,13 @@
     <IsTestProject>false</IsTestProject>
     <ToolCommandName>runx</ToolCommandName>
     <PackageId>MysterNybble.Runx</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.0-beta.1</Version>
     <Authors>MysterNybble</Authors>
     <Description>A repo command runner for .NET projects.</Description>
+    <PackageProjectUrl>https://github.com/joshucar/runx</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/joshucar/runx</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>dotnet-tool;cli;task-runner;build;automation</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <IsAotCompatible>true</IsAotCompatible>

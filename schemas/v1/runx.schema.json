@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+  "$id": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
   "title": "runx configuration",
   "description": "Task definitions for the runx repo command runner.",
   "type": "object",

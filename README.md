@@ -1,41 +1,43 @@
 # runx
 
-`runx` is an experimental repo command runner for .NET projects. It is meant to
+`runx` is a repo command runner for .NET projects, currently in beta. It is meant to
 be the command palette/front door for a repo, not a replacement for NUKE, Cake,
 FAKE, MSBuild, or other heavier build systems.
 
-Current development identity:
+## Install
 
-- Package ID: `MysterNybble.Runx`
-- Tool command: `runx`
-- Root namespace: `MysterNybble.Runx`
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+PowerShell tasks also require [PowerShell 7](https://aka.ms/powershell).
 
-## Install From Source
+The first NuGet release, `1.0.0-beta.1`, is being prepared. Until it is
+published, use [Install From Source](#install-from-source). Once published:
 
 ```powershell
-dotnet run --project src\MysterNybble.Runx -- tool:install
+dotnet tool install --global MysterNybble.Runx --version 1.0.0-beta.1
+```
+
+Update to the latest version, including betas:
+
+```powershell
+dotnet tool update --global MysterNybble.Runx --prerelease
+```
+
+Remove it with `dotnet tool uninstall --global MysterNybble.Runx`.
+
+## Quick Start
+
+From a repo that does not yet have a `runx.json`, create and run a starter task:
+
+```powershell
+runx --init
+runx dotnet-version
 runx --list
 ```
 
-`tool:install` is the script `eng/tasks/tool/install.ps1` (see Script Tasks). It
-packs the tool into `artifacts/packages` and reinstalls it as a global tool. Run
-it through `dotnet run` rather than an installed `runx`, because Windows locks
-the installed tool while it runs. Remove it with
-`dotnet tool uninstall --global MysterNybble.Runx`.
-
-## Build
-
-This repo uses its own `runx.json`:
-
-```powershell
-runx build
-runx test
-runx ci
-```
-
-Without `runx` installed, use `dotnet build`, `dotnet test`, or
-`dotnet run --project src\MysterNybble.Runx -- <task>`. Tests run on
-Microsoft.Testing.Platform, which `global.json` opts `dotnet test` into.
+The starter task prints your .NET SDK version. Edit `runx.json` to add your
+repo's build and test commands, or add scripts under `eng/tasks/` as described
+below. Run `runx` to choose a task interactively, or `runx --guide` for the
+built-in task authoring guide.
 
 ## Task Files
 
@@ -43,7 +45,7 @@ Microsoft.Testing.Platform, which `global.json` opts `dotnet test` into.
 
 ```json
 {
-  "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+  "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
   "version": 1,
   "tasks": {
     "build": {
@@ -274,3 +276,48 @@ The files use the same format as `runx.json`. Their tasks:
 
 Personal tasks apply only inside Git repos. `--file` uses exactly the file
 given, without personal tasks.
+
+## Install From Source
+
+Clone this repo and, from its root, run:
+
+```powershell
+dotnet run --project src/MysterNybble.Runx -- tool:install
+runx --list
+```
+
+`tool:install` is the PowerShell 7 script `eng/tasks/tool/install.ps1`. It
+packs the tool into `artifacts/packages` and reinstalls it as a global tool.
+Run it through `dotnet run` rather than an installed `runx`, because Windows
+locks the installed tool while it runs. This also supports replacing a local
+`1.0.0` development build with the beta.
+
+## Build and Test
+
+This repo uses its own `runx.json`:
+
+```powershell
+runx build
+runx test
+runx ci
+```
+
+Without `runx` installed, use `dotnet build`, `dotnet test`, or
+`dotnet run --project src/MysterNybble.Runx -- <task>`. Tests run on
+Microsoft.Testing.Platform, which `global.json` opts `dotnet test` into.
+
+GitHub Actions builds, tests, packs, and installs the resulting tool on
+Windows, Linux, and macOS. Successful jobs retain their NuGet packages as
+workflow artifacts for 14 days. To run the same package check locally with
+PowerShell 7:
+
+```powershell
+dotnet build --configuration Release
+dotnet test --configuration Release --no-build
+dotnet pack src/MysterNybble.Runx --configuration Release --no-build --output artifacts/packages
+pwsh -File eng/smoke-test.ps1
+```
+
+The smoke test expects exactly one runx package in `artifacts/packages`;
+move any older packages out before packing. It installs into an isolated
+folder under `artifacts/smoke` and leaves your global tool installation alone.

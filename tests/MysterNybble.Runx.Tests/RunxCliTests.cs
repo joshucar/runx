@@ -59,7 +59,7 @@ public sealed class RunxCliTests
         string configPath = System.IO.Path.Combine(tempDirectory.Path, "runx.json");
         Assert.Equal(0, exitCode);
         Assert.True(File.Exists(configPath));
-        Assert.Contains("\"$schema\": \"https://schemas.mysternybble.com/runx/v1/runx.schema.json\"", File.ReadAllText(configPath));
+        Assert.Contains("\"$schema\": \"https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json\"", File.ReadAllText(configPath));
         Assert.Contains("\"dotnet-version\"", File.ReadAllText(configPath));
         Assert.DoesNotContain("null", File.ReadAllText(configPath));
         Assert.Contains($"Created {configPath}.", output.ToString());
@@ -122,7 +122,7 @@ public sealed class RunxCliTests
             tempDirectory.Path,
             """
             {
-              "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+              "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
               "version": 1,
               "tasks": {
                 "test": {
@@ -174,7 +174,7 @@ public sealed class RunxCliTests
             repoPath,
             """
             {
-              "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+              "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
               "version": 1,
               "tasks": {
                 "test": {
@@ -222,7 +222,7 @@ public sealed class RunxCliTests
             tempDirectory.Path,
             """
             {
-              "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+              "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
               "version": 1,
               "tasks": {
                 "deploy": {
@@ -270,7 +270,7 @@ public sealed class RunxCliTests
             otherPath,
             """
             {
-              "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+              "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
               "version": 1,
               "tasks": {
                 "build": {
@@ -308,7 +308,7 @@ public sealed class RunxCliTests
             tempDirectory.Path,
             """
             {
-              "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+              "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
               "version": 1,
               "tasks": {
                 "build": {
@@ -362,7 +362,7 @@ public sealed class RunxCliTests
             tempDirectory.Path,
             """
             {
-              "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+              "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
               "version": 1,
               "unknown": true,
               "tasks": {
@@ -402,7 +402,7 @@ public sealed class RunxCliTests
             tempDirectory.Path,
             """
             {
-              "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+              "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
               "version": 1,
               "tasks": {
                 "hello": {

@@ -54,7 +54,7 @@ Rules for script tasks:
 ## Tasks in runx.json
 
     {
-      "$schema": "https://schemas.mysternybble.com/runx/v1/runx.schema.json",
+      "$schema": "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json",
       "version": 1,
       "tasks": {
         "build": { "description": "Build the solution.", "command": "dotnet", "args": ["build"] },

@@ -4,7 +4,7 @@ namespace MysterNybble.Runx;
 
 internal static class RunxInitializer
 {
-    private const string SchemaUrl = "https://schemas.mysternybble.com/runx/v1/runx.schema.json";
+    private const string SchemaUrl = "https://raw.githubusercontent.com/joshucar/runx/master/schemas/v1/runx.schema.json";
 
     public static async Task<int> InitializeAsync(
         CliParseResult parseResult,
