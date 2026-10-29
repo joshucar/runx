@@ -321,3 +321,40 @@ pwsh -File eng/smoke-test.ps1
 The smoke test expects exactly one runx package in `artifacts/packages`;
 move any older packages out before packing. It installs into an isolated
 folder under `artifacts/smoke` and leaves your global tool installation alone.
+
+## Releasing
+
+The `Release` workflow reuses CI to build, test, and install the package on all
+three operating systems. A manual run is a dry run: it also downloads the
+Linux package and checks its version and source commit, without publishing.
+
+Publishing uses [NuGet Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing).
+Sign in as `joshucar` and configure the policy with:
+
+| Setting | Value |
+|---|---|
+| NuGet package owner | `mysternybble` (organization) |
+| GitHub repository owner | `joshucar` |
+| GitHub repository | `runx` |
+| Workflow file | `release.yml` |
+| GitHub environment | `nuget` |
+| Package glob | `MysterNybble.Runx` |
+| Scope | Push new packages and package versions |
+
+The workflow authenticates as `joshucar`; the policy selects `mysternybble`
+as the package owner. No long-lived NuGet API key is required. The GitHub
+`nuget` environment allows deployment from `v*` tags.
+
+Once the policy is configured and the release commit is tested, push a tag
+matching the version in the project file:
+
+```powershell
+git tag v1.0.0-beta.1
+git push origin v1.0.0-beta.1
+```
+
+The tag run checks that the version and tag match, publishes the verified
+Linux-built package to NuGet, then creates a GitHub release with that package
+attached. Versions containing a prerelease suffix produce a GitHub prerelease.
+For later releases, update the project version and use the corresponding tag.
+Published versions are immutable; use a new version and tag for any changes.

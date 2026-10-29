@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # A manual run validates the release without publishing anything.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/ci.yml
+
+  prepare:
+    name: Verify release package
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: package-ubuntu-latest
+          path: artifacts/packages
+
+      - name: Verify version, tag, and source commit
+        id: package
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'push') { $env:GITHUB_REF_NAME } else { '' }
+          $version = ./eng/verify-release.ps1 -Tag $tag -ExpectedCommit $env:GITHUB_SHA
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "Verified MysterNybble.Runx $version from commit $env:GITHUB_SHA." >> $env:GITHUB_STEP_SUMMARY
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+              'Dry run complete. No NuGet upload or GitHub release was requested.' >> $env:GITHUB_STEP_SUMMARY
+          }
+
+  publish:
+    name: Publish to NuGet and GitHub
+    needs: prepare
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: nuget
+    permissions:
+      id-token: write
+      contents: write
+    env:
+      PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: package-ubuntu-latest
+          path: artifacts/packages
+
+      - name: Authenticate with NuGet
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: joshucar
+
+      - name: Publish package
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "artifacts/packages/MysterNybble.Runx.$env:PACKAGE_VERSION.nupkg" --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releaseArgs = @('release', 'create', $env:GITHUB_REF_NAME,
+              "artifacts/packages/MysterNybble.Runx.$env:PACKAGE_VERSION.nupkg",
+              '--verify-tag', '--title', "runx $env:PACKAGE_VERSION", '--generate-notes')
+          if ($env:PACKAGE_VERSION.Contains('-')) {
+              $releaseArgs += '--prerelease'
+          }
+          gh @releaseArgs
