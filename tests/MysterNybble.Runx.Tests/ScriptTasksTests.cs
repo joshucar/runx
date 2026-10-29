@@ -295,7 +295,7 @@ public sealed class ScriptTasksTests
             folder,
             "hello.cs",
             """
-            File.WriteAllText("cs.txt", $"{Environment.CurrentDirectory}|{string.Join(",", args)}");
+            File.WriteAllText("cs.txt", string.Join(",", args));
             return args.Length;
             """);
 
@@ -309,7 +309,8 @@ public sealed class ScriptTasksTests
             CancellationToken.None);
 
         Assert.Equal(2, exitCode);
-        Assert.Equal($"{root}|a,b c", File.ReadAllText(System.IO.Path.Combine(root, "cs.txt")));
+        // The relative output file also verifies the working directory, even through a symlink.
+        Assert.Equal("a,b c", File.ReadAllText(System.IO.Path.Combine(root, "cs.txt")));
     }
 
     private static async Task<int> RunAsync(

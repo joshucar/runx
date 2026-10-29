@@ -51,12 +51,15 @@ public sealed class PersonalTasksTests
 
         RepoIdentity mainWithoutRemote = await PersonalTasks.IdentifyAsync(main, git, isWindows, CancellationToken.None);
         RepoIdentity worktreeWithoutRemote = await PersonalTasks.IdentifyAsync(worktree, git, isWindows, CancellationToken.None);
+        // Git resolves symlinks in the checkout path, including macOS's /var -> /private/var.
+        string? mainGitRoot = await git.RunAsync(main, ["rev-parse", "--show-toplevel"], CancellationToken.None);
 
         await git.RunAsync(main, ["remote", "add", "origin", OriginUrl], CancellationToken.None);
         RepoIdentity worktreeWithRemote = await PersonalTasks.IdentifyAsync(worktree, git, isWindows, CancellationToken.None);
 
         Assert.True(File.Exists(System.IO.Path.Combine(worktree, ".git")), "The worktree was not created.");
-        Assert.Equal(RepoKey.FromLocalPath(main, isWindows), mainWithoutRemote.Key);
+        Assert.NotNull(mainGitRoot);
+        Assert.Equal(RepoKey.FromLocalPath(mainGitRoot, isWindows), mainWithoutRemote.Key);
         Assert.Equal(mainWithoutRemote.Key, worktreeWithoutRemote.Key);
         Assert.Equal("github.com/acme/api", worktreeWithRemote.Key);
     }
