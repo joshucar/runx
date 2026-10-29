@@ -3,24 +3,31 @@
   "version": 1,
   "tasks": {
     "build": {
-      "description": "Build the solution.",
+      "description": "Build the solution in Release configuration.",
       "command": "dotnet",
-      "args": ["build"]
+      "args": ["build", "runx.slnx", "--configuration", "Release"]
     },
     "test": {
       "description": "Build, then run the test suite.",
       "command": "dotnet",
-      "args": ["test", "--no-build"],
+      "args": ["test", "--configuration", "Release", "--no-build"],
       "dependsOn": ["build"]
     },
     "pack": {
       "description": "Pack the runx tool into artifacts/packages.",
       "command": "dotnet",
-      "args": ["pack", "src/MysterNybble.Runx", "--configuration", "Release", "--output", "artifacts/packages"]
+      "args": ["pack", "src/MysterNybble.Runx", "--configuration", "Release", "--no-build", "--output", "artifacts/packages"],
+      "dependsOn": ["build"]
+    },
+    "smoke": {
+      "description": "Install and smoke test the packed tool in isolation.",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "eng/smoke-test.ps1"],
+      "dependsOn": ["pack"]
     },
     "ci": {
-      "description": "Build, test, and pack.",
-      "dependsOn": ["test", "pack"]
+      "description": "Build, test, pack, and smoke test the tool.",
+      "dependsOn": ["test", "smoke"]
     },
     "tool:uninstall": {
       "description": "Uninstall the global runx tool.",

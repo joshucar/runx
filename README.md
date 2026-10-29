@@ -293,7 +293,8 @@ locks the installed tool while it runs. This also supports replacing a local
 
 ## Build and Test
 
-This repo uses its own `runx.json`:
+This repo uses its own `runx.json`. Build and test tasks use Release configuration;
+`ci` builds once, runs the tests, packs the tool, and smoke tests the package:
 
 ```powershell
 runx build
@@ -305,16 +306,17 @@ Without `runx` installed, use `dotnet build`, `dotnet test`, or
 `dotnet run --project src/MysterNybble.Runx -- <task>`. Tests run on
 Microsoft.Testing.Platform, which `global.json` opts `dotnet test` into.
 
-GitHub Actions builds, tests, packs, and installs the resulting tool on
-Windows, Linux, and macOS. Successful jobs retain their NuGet packages as
-workflow artifacts for 14 days. To run the same package check locally with
-PowerShell 7:
+GitHub Actions bootstraps runx from the checkout into `artifacts/bootstrap`,
+then uses that build to validate the repo tasks with `--check` and run `ci` on
+Windows, Linux, and macOS. The separate bootstrap output lets runx rebuild
+itself without replacing its running assemblies on Windows. Successful jobs
+retain their NuGet packages as workflow artifacts for 14 days. To run the same
+tasks locally without installing runx (requires PowerShell 7):
 
 ```powershell
-dotnet build --configuration Release
-dotnet test --configuration Release --no-build
-dotnet pack src/MysterNybble.Runx --configuration Release --no-build --output artifacts/packages
-pwsh -File eng/smoke-test.ps1
+dotnet build src/MysterNybble.Runx --configuration Release --output artifacts/bootstrap
+dotnet artifacts/bootstrap/MysterNybble.Runx.dll --check
+dotnet artifacts/bootstrap/MysterNybble.Runx.dll ci
 ```
 
 The smoke test expects exactly one runx package in `artifacts/packages`;

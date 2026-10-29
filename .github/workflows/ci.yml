@@ -29,6 +29,7 @@ jobs:
     env:
       DOTNET_NOLOGO: 'true'
       DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      ContinuousIntegrationBuild: 'true'
 
     steps:
       - uses: actions/checkout@v7
@@ -38,17 +39,15 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Build
-        run: dotnet build runx.slnx --configuration Release -p:ContinuousIntegrationBuild=true
+      # Keep the running tool separate from the outputs its build task replaces on Windows.
+      - name: Bootstrap runx from this checkout
+        run: dotnet build src/MysterNybble.Runx --configuration Release --output artifacts/bootstrap
 
-      - name: Test
-        run: dotnet test --configuration Release --no-build
+      - name: Validate repo tasks with runx
+        run: dotnet artifacts/bootstrap/MysterNybble.Runx.dll --check
 
-      - name: Pack
-        run: dotnet pack src/MysterNybble.Runx --configuration Release --no-build --output artifacts/packages -p:ContinuousIntegrationBuild=true
-
-      - name: Install and smoke test the package
-        run: ./eng/smoke-test.ps1
+      - name: Build, test, pack, and smoke test with runx
+        run: dotnet artifacts/bootstrap/MysterNybble.Runx.dll ci
 
       - name: Upload package
         uses: actions/upload-artifact@v7
