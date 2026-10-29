@@ -25,7 +25,7 @@ public sealed class PersonalTasksTests
         string mainCheckout = System.IO.Path.Combine(root, "main");
         RepoIdentity local = await PersonalTasks.IdentifyAsync(
             System.IO.Path.Combine(root, "worktree"),
-            new FakeGitClient().Returns("rev-parse --git-common-dir", System.IO.Path.Combine(mainCheckout, ".git")),
+            new FakeGitClient().Returns("rev-parse --path-format=absolute --git-common-dir", System.IO.Path.Combine(mainCheckout, ".git")),
             isWindows,
             CancellationToken.None);
 
@@ -34,9 +34,13 @@ public sealed class PersonalTasksTests
         Assert.Equal(RepoKey.FromLocalPath(mainCheckout, isWindows), local.Key);
     }
 
-    [Fact]
-    public async Task RealWorktreesShareTheMainCheckoutsKey()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealWorktreesShareTheMainCheckoutsKey(bool throughSymlink)
     {
+        Assert.SkipWhen(throughSymlink && OperatingSystem.IsWindows(), "Creating Windows symlinks requires additional permissions.");
+
         GitCli git = new();
         using TempDirectory tempDirectory = new();
         Assert.SkipWhen(await git.RunAsync(tempDirectory.Path, ["--version"], CancellationToken.None) is null, "Git is not installed.");
@@ -44,6 +48,11 @@ public sealed class PersonalTasksTests
         string main = System.IO.Path.Combine(tempDirectory.Path, "main");
         string worktree = System.IO.Path.Combine(tempDirectory.Path, "feature");
         Directory.CreateDirectory(main);
+        if (throughSymlink)
+        {
+            main = Directory.CreateSymbolicLink(System.IO.Path.Combine(tempDirectory.Path, "main-link"), main).FullName;
+        }
+
         await git.RunAsync(main, ["init", "--quiet"], CancellationToken.None);
         await git.RunAsync(main, ["-c", "user.name=runx", "-c", "user.email=runx@example.com", "commit", "--allow-empty", "--quiet", "-m", "init"], CancellationToken.None);
         await git.RunAsync(main, ["worktree", "add", "--quiet", "-b", "feature", worktree], CancellationToken.None);

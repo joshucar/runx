@@ -138,7 +138,8 @@ internal static class PersonalTasks
             return new RepoIdentity(repoRoot, remoteKey, $"remote '{remoteName}'", remoteName);
         }
 
-        string? commonDirectory = await git.RunAsync(repoRoot, ["rev-parse", "--git-common-dir"], cancellationToken);
+        // Canonicalize through Git so a symlinked main checkout and its worktrees share a key.
+        string? commonDirectory = await git.RunAsync(repoRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"], cancellationToken);
         if (commonDirectory is null)
         {
             return new RepoIdentity(repoRoot, RepoKey.FromLocalPath(repoRoot, isWindows), "repo folder, Git did not answer");
