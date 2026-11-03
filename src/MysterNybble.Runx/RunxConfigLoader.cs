@@ -19,7 +19,8 @@ internal static class RunxConfigLoader
         string? repoConfigPath,
         IReadOnlyList<PersonalTasksFile> personalFiles,
         string? scriptRoot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? repoJson = null)
     {
         ArgumentNullException.ThrowIfNull(personalFiles);
 
@@ -27,11 +28,13 @@ internal static class RunxConfigLoader
         Dictionary<string, TaskSource> sources = new(StringComparer.Ordinal);
         List<string> locations = [];
         List<string> errors = [];
+        List<string> warnings = [];
 
-        FileLoadResult? repo = repoConfigPath is null ? null : await LoadFileAsync(repoConfigPath, cancellationToken);
+        FileLoadResult? repo = repoConfigPath is null ? null : await LoadFileAsync(repoConfigPath, cancellationToken, repoJson);
         if (repo is not null)
         {
             errors.AddRange(repo.Errors);
+            warnings.AddRange(repo.Hooks?.Errors ?? []);
             locations.Add(repo.Path);
 
             foreach (KeyValuePair<string, RunxTask> task in repo.Tasks ?? [])
@@ -47,6 +50,10 @@ internal static class RunxConfigLoader
             FileLoadResult result = await LoadFileAsync(personalFile.Path, cancellationToken);
             personal.Add((personalFile, result));
             locations.Add(result.Path);
+            if (result.Hooks is { IsDeclared: true })
+            {
+                warnings.Add($"Git hook bindings in personal file {result.Path} are ignored; put them in the worktree root's runx.json.");
+            }
 
             if (result.Errors.Count > 0)
             {
@@ -56,7 +63,6 @@ internal static class RunxConfigLoader
         }
 
         TaskFolderSettings? taskFolders = null;
-        List<string> warnings = [];
         if (scriptRoot is not null)
         {
             taskFolders = ResolveTaskFolders(scriptRoot, repo, personal);
@@ -109,7 +115,8 @@ internal static class RunxConfigLoader
                 string.Join(" and ", locations),
                 unavailable,
                 personalFiles.Select(static file => Path.GetFullPath(file.Path)).ToArray(),
-                taskFolders),
+                taskFolders,
+                repo?.Hooks),
             Errors: [],
             warnings);
     }
@@ -192,7 +199,7 @@ internal static class RunxConfigLoader
         return unavailable;
     }
 
-    private static async Task<FileLoadResult> LoadFileAsync(string configPath, CancellationToken cancellationToken)
+    private static async Task<FileLoadResult> LoadFileAsync(string configPath, CancellationToken cancellationToken, string? providedJson = null)
     {
         string fullPath = Path.GetFullPath(configPath);
         string configDirectory = Path.GetDirectoryName(fullPath)
@@ -201,7 +208,7 @@ internal static class RunxConfigLoader
         string json;
         try
         {
-            json = await File.ReadAllTextAsync(fullPath, cancellationToken);
+            json = providedJson ?? await File.ReadAllTextAsync(fullPath, cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -231,7 +238,7 @@ internal static class RunxConfigLoader
             errors = RunxConfigValidator.Validate(config, document.RootElement, fullPath);
         }
 
-        return new FileLoadResult(fullPath, configDirectory, config?.Tasks, errors, config?.TaskFolders);
+        return new FileLoadResult(fullPath, configDirectory, config?.Tasks, errors, config?.TaskFolders, HookDeclarations.Parse(config?.Hooks ?? default));
     }
 
     private sealed record FileLoadResult(
@@ -239,7 +246,8 @@ internal static class RunxConfigLoader
         string Directory,
         Dictionary<string, RunxTask>? Tasks,
         IReadOnlyList<string> Errors,
-        List<string?>? TaskFolders = null)
+        List<string?>? TaskFolders = null,
+        HookDeclarations? Hooks = null)
     {
         public static FileLoadResult Failed(string path, string directory, string error)
         {

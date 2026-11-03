@@ -83,6 +83,11 @@ internal sealed class DefaultProcessRunner : IProcessRunner
                 return new ProcessResult(1);
             }
 
+            if (request.CloseStandardInput)
+            {
+                process.StandardInput.Close();
+            }
+
             try
             {
                 await process.WaitForExitAsync(cancellationToken);
@@ -109,7 +114,8 @@ internal sealed class DefaultProcessRunner : IProcessRunner
         ProcessStartInfo startInfo = new()
         {
             UseShellExecute = false,
-            WorkingDirectory = request.WorkingDirectory
+            WorkingDirectory = request.WorkingDirectory,
+            RedirectStandardInput = request.CloseStandardInput
         };
 
         foreach (KeyValuePair<string, string> env in request.Environment)

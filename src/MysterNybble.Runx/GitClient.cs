@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 
 namespace MysterNybble.Runx;
 
@@ -18,55 +17,21 @@ internal sealed class GitCli : IGitClient
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(arguments);
 
-        ProcessStartInfo startInfo = new("git")
+        string? executable = CommandResolver.ResolveFromEnvironment("git", repoRoot);
+        if (executable is null)
         {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-
-        startInfo.ArgumentList.Add("-C");
-        startInfo.ArgumentList.Add(repoRoot);
-        foreach (string argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
+            return null;
         }
 
-        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(s_timeout);
-
-        Process? process;
         try
         {
-            process = Process.Start(startInfo);
+            CommandOutput result = await CapturedProcess.RunAsync(repoRoot, executable, arguments, s_timeout, cancellationToken);
+            string output = result.Output.Trim();
+            return result.ExitCode == 0 && output.Length > 0 ? output : null;
         }
-        catch (Win32Exception)
+        catch (Exception ex) when (ex is Win32Exception or TimeoutException)
         {
             return null;
-        }
-
-        if (process is null)
-        {
-            return null;
-        }
-
-        using (process)
-        {
-            try
-            {
-                Task<string> output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-                Task<string> error = process.StandardError.ReadToEndAsync(timeout.Token);
-                await process.WaitForExitAsync(timeout.Token);
-                await Task.WhenAll(output, error);
-
-                string result = (await output).Trim();
-                return process.ExitCode == 0 && result.Length > 0 ? result : null;
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                process.Kill(entireProcessTree: true);
-                return null;
-            }
         }
     }
 }

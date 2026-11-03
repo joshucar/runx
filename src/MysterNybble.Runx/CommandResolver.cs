@@ -5,6 +5,9 @@ internal static class CommandResolver
     private const string DefaultPathExtensions = ".COM;.EXE;.BAT;.CMD";
     private const UnixFileMode ExecuteModes = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
 
+    public static string? ResolveFromEnvironment(string command, string workingDirectory) =>
+        Resolve(command, workingDirectory, Environment.GetEnvironmentVariable("PATH"), Environment.GetEnvironmentVariable("PATHEXT"), OperatingSystem.IsWindows());
+
     // Bare names are looked up only on the task's effective PATH. A name that is not found there fails
     // instead of falling back to Process.Start, which would search runx's own PATH and current directory.
     // Relative PATH entries are skipped so files in the repo cannot shadow tools.

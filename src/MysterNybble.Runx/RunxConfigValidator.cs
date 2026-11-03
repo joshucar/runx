@@ -6,7 +6,7 @@ internal static class RunxConfigValidator
 {
     private static readonly HashSet<string> s_taskPropertyNames = new(StringComparer.Ordinal)
     {
-        "description", "command", "args", "script", "shell", "cwd", "env", "dependsOn", "hide"
+        "description", "usage", "command", "args", "script", "shell", "cwd", "env", "dependsOn", "hide"
     };
 
     public static List<string> Validate(RunxConfig? config, JsonElement root, string configPath)
@@ -30,7 +30,6 @@ internal static class RunxConfigValidator
         }
 
         ValidateTaskFolders(config.TaskFolders, root, errors);
-
         if (config.Tasks is null)
         {
             errors.Add("Config property 'tasks' is required.");

@@ -28,7 +28,7 @@ internal static class ScriptTasks
 
     public static IReadOnlyList<string> ScriptExtensions { get; } = [".ps1", ".cs", ".sh", ".cmd", ".bat"];
 
-    public static IReadOnlyList<string> HeaderKeys { get; } = ["description", "depends", "hide"];
+    public static IReadOnlyList<string> HeaderKeys { get; } = ["description", "usage", "depends", "hide"];
 
     // Warnings, when given, collect problems that keep a script from being used as intended, such as
     // an invalid name or a misspelled header key, for 'runx --check'.
@@ -204,12 +204,18 @@ internal static class ScriptTasks
     {
         Dictionary<string, object> header = ReadHeader(file, displayPath, warnings);
         object? description = header.GetValueOrDefault("description");
+        object? usage = header.GetValueOrDefault("usage");
         object? depends = header.GetValueOrDefault("depends");
         object? hide = header.GetValueOrDefault("hide");
 
         if (description is not (null or string))
         {
             warnings?.Add($"{displayPath}: the header 'description' must be a quoted string.");
+        }
+
+        if (usage is not (null or string))
+        {
+            warnings?.Add($"{displayPath}: the header 'usage' must be a quoted string.");
         }
 
         if (depends is not (null or string or List<string>))
@@ -225,6 +231,7 @@ internal static class ScriptTasks
         return new RunxTask
         {
             Description = description as string,
+            Usage = usage as string,
             Command = runner.Command,
             Args = [.. runner.Arguments],
             DependsOn = depends switch

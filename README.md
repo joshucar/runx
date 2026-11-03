@@ -23,6 +23,33 @@ dotnet tool update --global MysterNybble.Runx --prerelease
 
 Remove it with `dotnet tool uninstall --global MysterNybble.Runx`.
 
+## Repo-local installation
+
+Global installation is convenient across repos. To pin a version for a team,
+create a tool manifest if the repo does not already have one, then install the
+chosen version locally:
+
+```powershell
+dotnet new tool-manifest --output .config
+dotnet tool install --local MysterNybble.Runx --version <version>
+```
+
+Commit `.config/dotnet-tools.json`. Contributors restore and invoke it with:
+
+```powershell
+dotnet tool restore
+dotnet tool run runx -- --guide
+dotnet tool run runx -- build
+```
+
+The first `--` belongs to `dotnet tool run`; it preserves runx options and any
+second `--` used to pass task arguments. Use that explicit invocation in hooks
+and automation too. A manifest does not
+redirect bare `runx` away from a global installation. It pins the runner package;
+the .NET SDK, PowerShell, and programs tasks invoke have their own requirements.
+Updates to the pinned version are intentional changes to the manifest. The
+examples below use `runx`; substitute `dotnet tool run runx --` for a local tool.
+
 ## Quick Start
 
 From a repo that does not yet have a `runx.json`, create and run a starter task:
@@ -87,6 +114,10 @@ Each task defines one of:
 Optional task properties:
 
 - `description`: shown by `runx --list` and the picker.
+- `usage`: optional free-form text shown by `--info` and JSON discovery. Document
+  accepted arguments and examples, using `\n` for line breaks in JSON. This is
+  author-provided help, not an argument schema; runx does not validate it or run
+  the task to obtain it. `args` contains fixed arguments, not all accepted options.
 - `dependsOn`: tasks to run first, in the order listed. Dependencies of
   dependencies run first too, and each task runs at most once. The run stops at
   the first task that fails, and Ctrl+C stops it even if the interrupted task
@@ -154,6 +185,33 @@ By default, config discovery stays inside the current Git repo. Outside a Git
 repo, only the current directory is checked. Use `--file <path>` for an explicit
 config file or `--allow-parent-search` to permit walking beyond that boundary.
 
+## Unattended tasks and task effects
+
+Tasks inherit the caller's terminal and stdin. Agent commands, hooks, pipes, and
+CI may have no terminal. A task that needs input should accept its own explicit
+unattended input option or fail clearly before doing work when it cannot prompt.
+runx does not translate a missing terminal into approval or invent `--yes` and
+noninteractive options for the programs it launches.
+
+For example, a task may implement `--secret-stdin`, invoked as
+`runx credentials:set -- --secret-stdin`. This is a task option, not a runx flag.
+Read that selected input source without echoing it; keep secrets out of command
+arguments, task configuration, and logs. Ordinary task dependencies inherit the
+same stdin and may consume it first, so design the task's input flow explicitly.
+Resolve required inputs before making changes. Shared prompt helpers, if a repo
+has them, are that repo's code rather than a runx API.
+
+`runx --dry-run deploy` prints the dependency plan without executing its tasks.
+`runx deploy -- --dry-run` executes dependencies normally and passes an option
+only to `deploy`; the task must implement its meaning. A runner preview shows
+launch commands, not every operation those commands perform internally.
+
+Document significant effects, such as publishing, deleting files, changing remote
+resources, or requiring credentials, in descriptions and usage text. Agents
+should inspect `--info` for the source and dependency plan and review relevant
+implementation and arguments. Metadata describes author intent; it is not a
+safety guarantee or a permission grant.
+
 ## Script Tasks
 
 Scripts in a repo's `eng/tasks/` folder are tasks without any config. The
@@ -198,11 +256,13 @@ eng/tasks/
 
   ```powershell
   # runx description="Pack the NuGet packages"
+  # runx usage="runx release:pack -- [-Configuration Debug]"
   # runx depends=["build"]
   # runx hide=true
   ```
 
-  `description` shows in the picker, `depends` works like `dependsOn`, and
+  `description` shows in the picker, `usage` appears in `--info` and JSON discovery,
+  `depends` works like `dependsOn`, and
   `hide` keeps the task out of the picker and `--list` while it still runs by
   name and as a dependency. Values are quoted strings, `true` or `false`, or
   `["a", "b"]` lists.
@@ -228,6 +288,108 @@ relative to the repo root. `"taskFolders": []` turns script discovery off.
 without script tasks.
 
 Any task in `runx.json` can also set `"hide": true`.
+
+## Git hooks
+
+Bind Git events to existing repo tasks in the root `runx.json`:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "pre-commit": "check",
+    "commit-msg": "git:check-message",
+    "pre-push": "git:check-push"
+  },
+  "tasks": {
+    "check": { "command": "dotnet", "args": ["format", "--verify-no-changes"] }
+  }
+}
+```
+
+In this example, add `eng/tasks/git/check-message.cs` and
+`eng/tasks/git/check-push.cs` to implement the other two tasks. They are normal
+script tasks: `check-message` receives the message-file path in `args[0]`, and
+`check-push` receives the remote name and location in `args`, plus Git's ref
+updates on stdin. Describe their arguments in `usage` headers.
+
+Activate the bindings explicitly in each clone:
+
+```powershell
+runx --install-hooks
+runx --check
+runx --info check
+runx --uninstall-hooks
+```
+
+Hook installation requires **Git 2.54 or newer**. It uses named registrations
+in the shared local Git config, without changing `core.hooksPath` or existing
+hook files. Other managers and hook registrations continue to run; avoid
+registering the same check twice. Installation adds or updates the current
+bindings and preserves other registrations, including runx events used by other
+worktrees. With no bindings or no root config, installation leaves Git config
+unchanged. Use `runx --install-hooks --prune` to explicitly remove runx events
+absent from this worktree, or `runx --uninstall-hooks` to remove all runx events.
+Both removals affect the whole clone and remove only runx-owned fields.
+Conflicting registrations are reported before changes are applied. Git `enabled`
+preferences, including global and worktree settings, survive installation and
+removal. Uninstall works even if `runx.json` is missing or invalid.
+
+Installation prefers a local tool manifest visible from the worktree root and
+verifies the restored tool's hook protocol. Otherwise it uses the installed
+runx executable you invoked. Invocations through `dotnet tool run`, `dnx`, or a
+DLL need a manifest visible from the root; they fail rather than substitute a
+different runx from PATH. The selected launcher is reported and stored in Git
+config. Install or update the tool first; running new source code does not
+upgrade an older installed tool. Git GUI clients also need access to the SDK and
+any commands the tasks use. Missing tools fail visibly.
+
+Registrations apply to **all linked worktrees of a clone**. When Git fires an
+event, runx reads that worktree's root `runx.json` and repo script folders,
+ignoring personal task files and their folder overrides. Bindings cannot target
+personal tasks. An unbound event does nothing, even when unrelated task
+definitions are invalid. Malformed JSON still fails because runx cannot determine
+whether the event is bound.
+The selected launcher must still be available in that worktree; a local tool
+needs a visible manifest and its restored package, even on branches without hooks.
+Changing a target or removing a binding takes effect immediately in that worktree.
+Install after adding an event. Prune only when the removed registrations are no
+longer needed by any worktree. Installation and removal affect every worktree.
+
+Supported events: `applypatch-msg`, `pre-applypatch`, `post-applypatch`,
+`pre-commit`, `pre-merge-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`,
+`pre-rebase`, `post-checkout`, `post-merge`, `pre-push`, and `post-rewrite`.
+Hooks receiving arguments need a command or script-file entry task; inline shell
+and dependency-only tasks work for events with no arguments. Git's arguments go
+only to the entry task. For `pre-push` and `post-rewrite`, only that entry task
+inherits hook stdin; dependencies receive EOF. Other hook executions receive EOF
+on stdin. Ordinary `runx <task>` input behavior is unchanged.
+
+Use `runx --dry-run --hook pre-commit` to inspect the exact hook plan, or
+`runx --hook commit-msg -- <message-file>` to invoke an entry with explicit hook
+arguments. These actions use the current worktree's root config and do not take
+`--file` or personal-task options. Hook-related operations use Git's root discovery,
+including `GIT_DIR` and `GIT_WORK_TREE` overrides.
+
+Hook validation uses the root config and its repo scripts independently of ordinary
+task discovery. `--file`, personal folder overrides, and `--new` remain usable when
+hook targets are absent from their task view. `--check` fails for invalid root hook
+definitions, including when invoked from a nested config. Missing, retained,
+conflicting, or disabled registrations are reported separately as warnings.
+Checking does not execute hooks or prove that their commands will work.
+
+`--info` and JSON discovery expose root bindings and their `hookConfig` source;
+JSON also includes `hookErrors`. A task is labelled with a hook only when its
+source matches the root task, not merely its name. Bindings in nested or personal
+configs are inactive. Hook inspection is limited to `--check`, `--info`,
+`--list --json`, and hook actions. Ordinary task runs, previews, and scaffolding
+do not inspect hooks or reload the root task configuration for hook diagnostics.
+
+runx returns the task's exit status to Git. Git decides whether that status can
+block the operation: pre-commit can reject a commit, while post-commit runs after
+the commit exists. Hooks are local and can be bypassed; keep required checks in
+CI. Staged-file selection, formatting/restaging, and commit-message policies
+belong to tasks, and are not added automatically by installation.
 
 ## Personal Tasks
 
