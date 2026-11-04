@@ -88,6 +88,17 @@ internal static class RunxCli
             return 1;
         }
 
+        if (parseResult.HookProtocol)
+        {
+            output.WriteLine(GitHooks.ProtocolVersion);
+            return 0;
+        }
+
+        if (parseResult.InstallHooks || parseResult.UninstallHooks || parseResult.HookName is not null)
+        {
+            return await RunHookActionAsync(parseResult, currentDirectory, processRunner, output, error, cancellationToken);
+        }
+
         if (parseResult.InstallSkill)
         {
             return RunxGuide.InstallSkill(RunxGuide.GetDefaultClaudeDirectory(), output, error);
@@ -161,18 +172,7 @@ internal static class RunxCli
             && Directory.Exists(Path.Combine(scriptRoot, ScriptTasks.DefaultFolder));
 
         bool nothingFound = searchResult.ConfigPath is null && personalFiles.Count == 0 && !hasDefaultTaskFolder;
-        if (nothingFound && parseResult.Check)
-        {
-            return TaskReports.WriteCheck(new ConfigLoadResult(Config: null, Errors: []), nothingFound: true, parseResult.Json, output);
-        }
-
-        if (nothingFound && parseResult.List && parseResult.Json)
-        {
-            TaskReports.WriteJsonList(config: null, output);
-            return 0;
-        }
-
-        if (nothingFound && parseResult.NewTaskName is null)
+        if (nothingFound && parseResult.NewTaskName is null && !parseResult.Check && !(parseResult.List && parseResult.Json))
         {
             if (parseResult.TaskName is null && !parseResult.List && parseResult.FilePath is null)
             {
@@ -189,9 +189,54 @@ internal static class RunxCli
         }
 
         ConfigLoadResult loadResult = await RunxConfigLoader.LoadAsync(searchResult.ConfigPath, personalFiles, scriptRoot, cancellationToken);
+        HookConfiguration? hookConfig = null;
+        List<string> hookWarnings = [];
+        List<string> hookErrors = [];
+        bool reports = parseResult.InfoTaskName is not null || (parseResult.List && parseResult.Json);
+        if (parseResult.Check || reports)
+        {
+            try
+            {
+                GitRepository? repository = await GitRepository.FindAsync(fullCurrentDirectory, cancellationToken);
+                if (repository is not null)
+                {
+                    hookConfig = await HookConfiguration.LoadAsync(repository, cancellationToken);
+                    hookErrors.AddRange(hookConfig.Errors.Select(static message => $"Git hook config: {message}"));
+                    if (parseResult.Check && hookConfig.Errors.Count == 0)
+                    {
+                        hookWarnings.AddRange(await GitHookInstallation.CheckAsync(repository, hookConfig.Bindings, cancellationToken));
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                hookErrors.Add($"Git hooks: {ex.Message}");
+            }
+
+            if (loadResult.Config?.DeclaredHooks is { IsDeclared: true }
+                && (hookConfig is null || searchResult.ConfigPath is null || !HookConfiguration.SamePath(searchResult.ConfigPath, hookConfig.ConfigPath)))
+            {
+                hookWarnings.Add($"Git hook bindings in {searchResult.ConfigPath} are not active here. Hooks use Git's worktree root runx.json, with Git available on PATH.");
+            }
+        }
+
         if (parseResult.Check)
         {
-            return TaskReports.WriteCheck(loadResult, nothingFound: false, parseResult.Json, output);
+            loadResult = loadResult with
+            {
+                Errors = [.. loadResult.Errors, .. hookErrors],
+                Warnings = [.. (loadResult.Warnings ?? []).Concat(hookConfig?.Warnings ?? []).Concat(hookWarnings).Distinct(StringComparer.Ordinal)]
+            };
+            return TaskReports.WriteCheck(loadResult, nothingFound, parseResult.Json, output);
+        }
+
+        hookWarnings.AddRange(hookErrors);
+        if (!parseResult.Json)
+        {
+            foreach (string warning in hookWarnings.Distinct(StringComparer.Ordinal))
+            {
+                error.WriteLine($"warning: {warning}");
+            }
         }
 
         if (loadResult.Errors.Count > 0 || loadResult.Config is null)
@@ -211,12 +256,12 @@ internal static class RunxCli
 
         if (parseResult.InfoTaskName is not null)
         {
-            return TaskReports.WriteInfo(loadResult.Config, parseResult.InfoTaskName, parseResult.Json, output, error);
+            return TaskReports.WriteInfo(loadResult.Config, parseResult.InfoTaskName, parseResult.Json, output, error, hookConfig, hookWarnings);
         }
 
         if (parseResult.List && parseResult.Json)
         {
-            TaskReports.WriteJsonList(loadResult.Config, output);
+            TaskReports.WriteJsonList(loadResult.Config, output, hookConfig, hookWarnings);
             return 0;
         }
 
@@ -236,33 +281,111 @@ internal static class RunxCli
             }
         }
 
-        if (!loadResult.Config.Tasks.TryGetValue(taskName, out RunxTask? task))
+        return await RunTaskAsync(loadResult.Config, taskName, parseResult.TaskArguments, parseResult.DryRun, processRunner, output, error, cancellationToken);
+    }
+
+    private static async Task<int> RunHookActionAsync(
+        CliParseResult options, string currentDirectory, IProcessRunner processRunner,
+        TextWriter output, TextWriter error, CancellationToken cancellationToken)
+    {
+        try
         {
-            error.WriteLine(loadResult.Config.Unavailable?.GetValueOrDefault(taskName)
-                ?? $"Task '{taskName}' was not found in {loadResult.Config.Location}.");
+            GitRepository repository = await GitRepository.RequireAsync(currentDirectory, cancellationToken);
+            if (options.UninstallHooks)
+            {
+                await GitHookInstallation.UpdateAsync(repository, new Dictionary<string, string>(), null, output, cancellationToken);
+                return 0;
+            }
+
+            if (options.HookName is string eventName && !GitHooks.Events.ContainsKey(eventName))
+            {
+                error.WriteLine($"Unknown or unsupported Git hook '{eventName}'.");
+                return 1;
+            }
+
+            HookConfiguration config = await HookConfiguration.LoadAsync(repository, cancellationToken, options.HookName);
+            if (config.Errors.Count > 0)
+            {
+                foreach (string message in config.Errors)
+                {
+                    error.WriteLine(message);
+                }
+
+                return 1;
+            }
+
+            if (options.InstallHooks)
+            {
+                if (config.Bindings.Count == 0 && !options.PruneHooks)
+                {
+                    output.WriteLine("No Git hook bindings in this worktree. Existing registrations were left unchanged. Use --uninstall-hooks to remove all runx registrations, or --install-hooks --prune to remove unbound registrations across the clone.");
+                    return 0;
+                }
+
+                string? launcher = config.Bindings.Count == 0 ? null : await GitHooks.ResolveLauncherAsync(repository.Root, cancellationToken);
+                await GitHookInstallation.UpdateAsync(repository, config.Bindings, launcher, output, cancellationToken, options.PruneHooks);
+                return 0;
+            }
+
+            string hook = options.HookName!;
+            if (!config.Bindings.TryGetValue(hook, out string? target))
+            {
+                if (options.DryRun)
+                {
+                    output.WriteLine($"Git hook '{hook}' has no binding in this worktree.");
+                }
+
+                return 0;
+            }
+
+            if (GitHooks.ValidateInvocation(hook, options.TaskArguments.Count) is string invocationError)
+            {
+                error.WriteLine(invocationError);
+                return 1;
+            }
+
+            return await RunTaskAsync(config.Tasks!, target, options.TaskArguments, options.DryRun,
+                processRunner, output, error, cancellationToken, GitHooks.Events[hook]);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.Text.Json.JsonException)
+        {
+            error.WriteLine($"Git hooks: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static async Task<int> RunTaskAsync(
+        LoadedRunxConfig config, string taskName, IReadOnlyList<string> arguments, bool dryRun,
+        IProcessRunner processRunner, TextWriter output, TextWriter error, CancellationToken cancellationToken,
+        HookEvent? hookEvent = null)
+    {
+        if (!config.Tasks.TryGetValue(taskName, out RunxTask? task))
+        {
+            error.WriteLine(config.Unavailable?.GetValueOrDefault(taskName)
+                ?? $"Task '{taskName}' was not found in {config.Location}.");
             return 1;
         }
 
-        if (!ProcessRequestFactory.IsRunnable(task) && parseResult.TaskArguments.Count > 0)
+        if (!ProcessRequestFactory.IsRunnable(task) && arguments.Count > 0)
         {
             error.WriteLine($"Task '{taskName}' only runs its dependencies. Argument passthrough is not supported.");
             return 1;
         }
 
         List<ProcessRequest> requests = [];
-        foreach (string stepName in TaskPlanner.GetExecutionOrder(loadResult.Config.Tasks, taskName))
+        foreach (string stepName in TaskPlanner.GetExecutionOrder(config.Tasks, taskName))
         {
-            RunxTask stepTask = loadResult.Config.Tasks[stepName];
+            RunxTask stepTask = config.Tasks[stepName];
             if (!ProcessRequestFactory.IsRunnable(stepTask))
             {
                 continue;
             }
 
             ProcessRequestBuildResult requestResult = ProcessRequestFactory.Build(
-                loadResult.Config,
+                config,
                 stepName,
                 stepTask,
-                stepName == taskName ? parseResult.TaskArguments : []);
+                stepName == taskName ? arguments : []);
 
             if (requestResult.Errors.Count > 0 || requestResult.Request is null)
             {
@@ -274,10 +397,13 @@ internal static class RunxCli
                 return 1;
             }
 
-            requests.Add(requestResult.Request);
+            requests.Add(hookEvent is null ? requestResult.Request : requestResult.Request with
+            {
+                CloseStandardInput = stepName != taskName || !hookEvent.HasStandardInput
+            });
         }
 
-        if (parseResult.DryRun)
+        if (dryRun)
         {
             WriteDryRun(requests, output);
             return 0;
@@ -347,6 +473,11 @@ internal static class RunxCli
         output.WriteLine("  --check                 Validate all tasks without running anything.");
         output.WriteLine("  --json                  With --list, --info, or --check, write JSON.");
         output.WriteLine("  --guide                 Explain how to add tasks, for people and AI agents.");
+        output.WriteLine("  --install-hooks         Install this repo's Git hook bindings (Git 2.54+).");
+        output.WriteLine("  --prune                 With --install-hooks, remove unbound registrations across the clone.");
+        output.WriteLine("  --hook-protocol         Print the hook dispatcher protocol version.");
+        output.WriteLine("  --uninstall-hooks       Remove runx-owned Git hook registrations.");
+        output.WriteLine("  --hook <event>          Run a hook's task; Git arguments follow '--'.");
         output.WriteLine("  --install-skill         Install the runx skill for Claude Code.");
         output.WriteLine("  --file <path>           Use an explicit runx.json path.");
         output.WriteLine("  --allow-parent-search   Allow config discovery beyond the safe search boundary.");
@@ -358,11 +489,22 @@ internal static class RunxCli
     // Options that only mean something alongside another one.
     private static string? GetOptionError(CliParseResult parseResult)
     {
+        if ((parseResult.InstallHooks || parseResult.UninstallHooks || parseResult.HookName is not null)
+            && (parseResult.FilePath is not null || parseResult.AllowParentSearch || parseResult.Personal || parseResult.Scope is not null))
+        {
+            return "Git hook actions use the current worktree's root runx.json; --file, --allow-parent-search, --personal, and --scope do not apply.";
+        }
+
+        if (parseResult.PruneHooks && !parseResult.InstallHooks)
+        {
+            return "--prune can only be used with --install-hooks.";
+        }
+
         bool reports = parseResult.List || parseResult.Check || parseResult.InfoTaskName is not null;
         bool creating = parseResult.NewTaskName is not null;
 
         if (parseResult.DryRun && (parseResult.Init || parseResult.Where || parseResult.Guide || parseResult.InstallSkill
-            || parseResult.Check || creating || parseResult.InfoTaskName is not null))
+            || parseResult.Check || creating || parseResult.InfoTaskName is not null || parseResult.InstallHooks || parseResult.UninstallHooks || parseResult.HookProtocol))
         {
             return "--dry-run can only be used with a task.";
         }

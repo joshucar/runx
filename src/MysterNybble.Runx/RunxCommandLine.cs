@@ -42,11 +42,15 @@ internal static class RunxCommandLine
         bool guide = parseResult.GetValue(commandLine.Guide);
         bool installSkill = parseResult.GetValue(commandLine.InstallSkill);
         bool check = parseResult.GetValue(commandLine.Check);
+        bool installHooks = parseResult.GetValue(commandLine.InstallHooks);
+        bool uninstallHooks = parseResult.GetValue(commandLine.UninstallHooks);
+        bool hookProtocol = parseResult.GetValue(commandLine.HookProtocol);
+        string? hookName = parseResult.GetValue(commandLine.Hook);
         string? newTaskName = parseResult.GetValue(commandLine.New);
         string? infoTaskName = parseResult.GetValue(commandLine.Info);
 
         List<string> errors = [];
-        bool[] actions = [list, init, where, guide, installSkill, check, newTaskName is not null, infoTaskName is not null];
+        bool[] actions = [list, init, where, guide, installSkill, check, installHooks, uninstallHooks, hookProtocol, hookName is not null, newTaskName is not null, infoTaskName is not null];
         int actionCount = actions.Count(static action => action);
         if (actionCount > 1)
         {
@@ -58,7 +62,7 @@ internal static class RunxCommandLine
             errors.Add("Tool action flags cannot be combined with a task name.");
         }
 
-        if (delimiterIndex >= 0 && taskName is null)
+        if (delimiterIndex >= 0 && taskName is null && hookName is null)
         {
             errors.Add("Task arguments after '--' require a task name.");
         }
@@ -87,6 +91,11 @@ internal static class RunxCommandLine
             Guide = guide,
             InstallSkill = installSkill,
             Check = check,
+            InstallHooks = installHooks,
+            UninstallHooks = uninstallHooks,
+            HookProtocol = hookProtocol,
+            PruneHooks = parseResult.GetValue(commandLine.PruneHooks),
+            HookName = hookName,
             Json = parseResult.GetValue(commandLine.Json),
             InfoTaskName = infoTaskName,
             NewTaskName = newTaskName,
@@ -137,7 +146,7 @@ internal sealed class CommandLineModel
     {
         RootCommand = new RootCommand("repo command runner for .NET projects");
         foreach (Option option in (Option[])
-            [List, Init, Force, File, AllowParentSearch, DryRun, Personal, Where, Scope, Guide, InstallSkill, Check, Json, Info, New, Type, Description, Depends, Hide])
+            [List, Init, Force, File, AllowParentSearch, DryRun, Personal, Where, Scope, Guide, InstallSkill, Check, Json, Info, New, Type, Description, Depends, Hide, InstallHooks, UninstallHooks, Hook, HookProtocol, PruneHooks])
         {
             RootCommand.Options.Add(option);
         }
@@ -191,6 +200,16 @@ internal sealed class CommandLineModel
 
     public Option<bool> Hide { get; } = new("--hide") { Description = "With --new: keep the task out of the picker and --list." };
 
+    public Option<bool> InstallHooks { get; } = new("--install-hooks") { Description = "Install this repo's Git hook bindings locally." };
+
+    public Option<bool> UninstallHooks { get; } = new("--uninstall-hooks") { Description = "Remove runx-owned Git hook registrations." };
+
+    public Option<string?> Hook { get; } = new("--hook") { Description = "Dispatch a Git hook to its configured task." };
+
+    public Option<bool> HookProtocol { get; } = new("--hook-protocol") { Description = "Print the hook dispatcher protocol version." };
+
+    public Option<bool> PruneHooks { get; } = new("--prune") { Description = "With --install-hooks, remove registrations not bound in this worktree." };
+
     public Argument<string?> Task { get; } = new("task") { Arity = ArgumentArity.ZeroOrOne, Description = "Task to run." };
 }
 
@@ -218,6 +237,16 @@ internal sealed record CliParseResult(
     public bool InstallSkill { get; init; }
 
     public bool Check { get; init; }
+
+    public bool InstallHooks { get; init; }
+
+    public bool UninstallHooks { get; init; }
+
+    public string? HookName { get; init; }
+
+    public bool HookProtocol { get; init; }
+
+    public bool PruneHooks { get; init; }
 
     public bool Json { get; init; }
 

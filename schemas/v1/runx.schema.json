@@ -21,6 +21,30 @@
       "items": { "type": "string", "pattern": "\\S" },
       "description": "Folders to discover script tasks in, replacing the default eng/tasks. Relative to this file, or to the repo root in personal files. An empty array turns discovery off."
     },
+    "hooks": {
+      "type": "object",
+      "description": "Git hook events mapped to repo task names in the worktree root runx.json. Activate with runx --install-hooks (Git 2.54+); use --prune explicitly to remove unbound registrations across the clone. Nested and personal bindings are inactive.",
+      "propertyNames": {
+        "enum": [
+          "applypatch-msg",
+          "pre-applypatch",
+          "post-applypatch",
+          "pre-commit",
+          "pre-merge-commit",
+          "prepare-commit-msg",
+          "commit-msg",
+          "post-commit",
+          "pre-rebase",
+          "post-checkout",
+          "post-merge",
+          "pre-push",
+          "post-rewrite"
+        ]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/taskName"
+      }
+    },
     "tasks": {
       "type": "object",
       "description": "Tasks keyed by name. Run a task with 'runx <name>'.",
@@ -40,6 +64,10 @@
         "description": {
           "type": "string",
           "description": "Shown by 'runx --list' and the task picker."
+        },
+        "usage": {
+          "type": "string",
+          "description": "Optional author-provided usage text shown by --info and JSON discovery. Does not validate arguments."
         },
         "command": {
           "type": "string",

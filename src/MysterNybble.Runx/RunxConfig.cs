@@ -14,6 +14,9 @@ internal sealed class RunxConfig
 
     public List<string?>? TaskFolders { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public JsonElement Hooks { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }
@@ -21,6 +24,8 @@ internal sealed class RunxConfig
 internal sealed class RunxTask
 {
     public string? Description { get; set; }
+
+    public string? Usage { get; set; }
 
     public string? Command { get; set; }
 
@@ -67,7 +72,8 @@ internal sealed record LoadedRunxConfig(
     string Location,
     IReadOnlyDictionary<string, string>? Unavailable = null,
     IReadOnlyList<string>? PersonalFiles = null,
-    TaskFolderSettings? TaskFolders = null)
+    TaskFolderSettings? TaskFolders = null,
+    HookDeclarations? DeclaredHooks = null)
 {
     public LoadedRunxConfig(string path, string directory, IReadOnlyDictionary<string, RunxTask> tasks)
         : this(tasks, tasks.Keys.ToDictionary(static name => name, _ => new TaskSource(path, directory), StringComparer.Ordinal), path)

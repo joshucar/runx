@@ -39,8 +39,12 @@ $configPath = Join-Path $smokeRoot 'nuget.config'
 $config.Save($configPath)
 
 $previousPackages = $env:NUGET_PACKAGES
+$previousCliHome = $env:DOTNET_CLI_HOME
 try {
     $env:NUGET_PACKAGES = Join-Path $smokeRoot 'cache'
+    # Local tool resolution is cached separately from packages. Isolate both so a
+    # repeated smoke test of the same development version uses the new package.
+    $env:DOTNET_CLI_HOME = Join-Path $smokeRoot 'cli'
     Invoke-Checked dotnet @('tool', 'install', 'MysterNybble.Runx', '--version', $version,
         '--tool-path', $toolPath, '--configfile', $configPath, '--no-cache')
 
@@ -58,8 +62,10 @@ try {
         throw 'The installed tool did not list the starter task.'
     }
     Invoke-Checked $tool @('--file', $taskFile, 'dotnet-version')
+    & (Join-Path $PSScriptRoot 'hooks-smoke-test.ps1') -Tool $tool -Workspace $workspace -PackageVersion $version -NuGetConfig $configPath
     Write-Output "Package smoke test passed for $version."
 }
 finally {
     $env:NUGET_PACKAGES = $previousPackages
+    $env:DOTNET_CLI_HOME = $previousCliHome
 }

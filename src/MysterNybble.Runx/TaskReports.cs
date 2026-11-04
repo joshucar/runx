@@ -8,7 +8,7 @@ namespace MysterNybble.Runx;
 internal static class TaskReports
 {
     // With no config there are no tasks, which is still a valid, empty list.
-    public static void WriteJsonList(LoadedRunxConfig? config, TextWriter output)
+    public static void WriteJsonList(LoadedRunxConfig? config, TextWriter output, HookConfiguration? hooks = null, IReadOnlyList<string>? warnings = null)
     {
         ArgumentNullException.ThrowIfNull(output);
 
@@ -18,15 +18,25 @@ internal static class TaskReports
             writer.WriteStartArray("tasks");
             foreach (string taskName in config?.Tasks.Keys.Order(StringComparer.Ordinal) ?? Enumerable.Empty<string>())
             {
-                WriteTask(writer, config!, taskName, plan: null);
+                WriteTask(writer, config!, taskName, plan: null, hooks);
             }
 
             writer.WriteEndArray();
+            writer.WriteStartObject("hooks");
+            foreach ((string hook, string target) in (hooks?.Bindings ?? new Dictionary<string, string>()).OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+            {
+                writer.WriteString(hook, target);
+            }
+
+            writer.WriteEndObject();
+            writer.WriteString("hookConfig", hooks?.ConfigPath);
+            WriteStrings(writer, "hookErrors", hooks?.Errors ?? []);
+            WriteStrings(writer, "warnings", warnings ?? []);
             writer.WriteEndObject();
         });
     }
 
-    public static int WriteInfo(LoadedRunxConfig config, string taskName, bool json, TextWriter output, TextWriter error)
+    public static int WriteInfo(LoadedRunxConfig config, string taskName, bool json, TextWriter output, TextWriter error, HookConfiguration? hookConfig = null, IReadOnlyList<string>? warnings = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(taskName);
@@ -46,7 +56,7 @@ internal static class TaskReports
 
         if (json)
         {
-            WriteJson(output, writer => WriteTask(writer, config, taskName, plan));
+            WriteJson(output, writer => WriteTask(writer, config, taskName, plan, hookConfig, warnings));
             return 0;
         }
 
@@ -57,6 +67,20 @@ internal static class TaskReports
             ("Description", string.IsNullOrWhiteSpace(task.Description) ? "(none)" : task.Description),
             ("Source", $"{GetSourceLabel(source)}  {source.ConfigPath}")
         ];
+
+        if (task.Usage is not null)
+        {
+            string[] lines = task.Usage.ReplaceLineEndings("\n").Split('\n');
+            rows.Add(("Usage", lines[0]));
+            rows.AddRange(lines.Skip(1).Select(static line => (string.Empty, line)));
+        }
+
+        string[] hooks = hookConfig?.EventsFor(taskName, source) ?? [];
+        if (hooks.Length > 0)
+        {
+            rows.Add(("Git hooks", string.Join(", ", hooks)));
+            rows.Add(("Hook config", hookConfig!.ConfigPath));
+        }
 
         string[] runs = DescribeRun(task);
         rows.Add(("Runs", runs[0]));
@@ -101,8 +125,8 @@ internal static class TaskReports
         ArgumentNullException.ThrowIfNull(output);
 
         IReadOnlyList<string> warnings = result.Warnings ?? [];
-        bool valid = nothingFound || (result.Errors.Count == 0 && result.Config is not null);
-        string summary = nothingFound
+        bool valid = result.Errors.Count == 0 && (nothingFound || result.Config is not null);
+        string summary = nothingFound && valid
             ? "No tasks here: no runx.json, no task folder, and no personal tasks."
             : valid ? $"OK: {DescribeCounts(result.Config!)}." : "runx --check found problems.";
 
@@ -171,7 +195,7 @@ internal static class TaskReports
         return hidden > 0 ? $"{counts}, {hidden} hidden" : counts;
     }
 
-    private static void WriteTask(Utf8JsonWriter writer, LoadedRunxConfig config, string taskName, IReadOnlyList<string>? plan)
+    private static void WriteTask(Utf8JsonWriter writer, LoadedRunxConfig config, string taskName, IReadOnlyList<string>? plan, HookConfiguration? hooks = null, IReadOnlyList<string>? warnings = null)
     {
         RunxTask task = config.Tasks[taskName];
         TaskSource source = config.Sources[taskName];
@@ -179,6 +203,9 @@ internal static class TaskReports
         writer.WriteStartObject();
         writer.WriteString("name", taskName);
         writer.WriteString("description", task.Description);
+        writer.WriteString("usage", task.Usage);
+        WriteStrings(writer, "hooks", hooks?.EventsFor(taskName, source) ?? []);
+        writer.WriteString("hookConfig", hooks?.ConfigPath);
         writer.WriteString("source", source.IsPersonal ? "personal" : source.IsScript ? "script" : "config");
         writer.WriteString("scope", source.PersonalTag);
         writer.WriteString("file", source.ConfigPath);
@@ -208,6 +235,8 @@ internal static class TaskReports
         if (plan is not null)
         {
             WriteStrings(writer, "plan", plan);
+            WriteStrings(writer, "hookErrors", hooks?.Errors ?? []);
+            WriteStrings(writer, "warnings", warnings ?? []);
         }
 
         writer.WriteEndObject();
