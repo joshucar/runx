@@ -40,8 +40,8 @@ internal static class TaskReports
             return 1;
         }
 
-        string[] plan = TaskPlanner.GetExecutionOrder(config.Tasks, taskName)
-            .Where(name => ProcessRequestFactory.IsRunnable(config.Tasks[name]))
+        TaskDependency[] plan = TaskPlanner.Build(config.Tasks, taskName).Steps
+            .Where(step => ProcessRequestFactory.IsRunnable(config.Tasks[step.Task]))
             .ToArray();
 
         if (json)
@@ -79,7 +79,7 @@ internal static class TaskReports
 
         if (plan.Length > 1)
         {
-            rows.Add(("Plan", string.Join(" -> ", plan)));
+            rows.Add(("Plan", string.Join(" -> ", plan.Select(static step => step.ToString()))));
         }
 
         if (task.Hide == true)
@@ -171,7 +171,7 @@ internal static class TaskReports
         return hidden > 0 ? $"{counts}, {hidden} hidden" : counts;
     }
 
-    private static void WriteTask(Utf8JsonWriter writer, LoadedRunxConfig config, string taskName, IReadOnlyList<string>? plan)
+    private static void WriteTask(Utf8JsonWriter writer, LoadedRunxConfig config, string taskName, IReadOnlyList<TaskDependency>? plan)
     {
         RunxTask task = config.Tasks[taskName];
         TaskSource source = config.Sources[taskName];
@@ -202,12 +202,28 @@ internal static class TaskReports
 
         writer.WriteString("cwd", GetWorkingDirectory(task, source));
         WriteStrings(writer, "env", task.Env?.Keys.Order(StringComparer.Ordinal).ToArray() ?? []);
-        WriteStrings(writer, "dependsOn", task.DependsOn?.OfType<string>().ToArray() ?? []);
+        writer.WriteStartArray("dependsOn");
+        foreach (TaskDependency dependency in task.DependsOn?.OfType<TaskDependency>() ?? [])
+        {
+            JsonSerializer.Serialize(writer, dependency, RunxJsonSerializerContext.Default.TaskDependency);
+        }
+
+        writer.WriteEndArray();
         writer.WriteBoolean("hidden", task.Hide == true);
 
         if (plan is not null)
         {
-            WriteStrings(writer, "plan", plan);
+            WriteStrings(writer, "plan", plan.Select(static step => step.Task));
+            writer.WriteStartArray("steps");
+            foreach (TaskDependency step in plan)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("task", step.Task);
+                WriteStrings(writer, "args", step.Args);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
         }
 
         writer.WriteEndObject();

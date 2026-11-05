@@ -106,8 +106,10 @@ public sealed class PersonalTasksTests
         Assert.All(processRunner.Requests, request => Assert.Equal(personalPath, request.ConfigPath));
     }
 
-    [Fact]
-    public async Task PersonalTasksMergeWithRepoTasksAndCanDependOnThem()
+    [Theory]
+    [InlineData("\"build\"", false)]
+    [InlineData("{\"task\":\"build\",\"args\":[\"--configuration\",\"Release\"]}", true)]
+    public async Task PersonalTasksMergeWithRepoTasksAndCanDependOnThem(string dependency, bool hasArguments)
     {
         using TempDirectory tempDirectory = new();
         string home = System.IO.Path.Combine(tempDirectory.Path, "home");
@@ -115,7 +117,7 @@ public sealed class PersonalTasksTests
         WriteRepoConfig(root, """{ "version": 1, "tasks": { "build": { "description": "Build it.", "command": "dotnet", "args": ["build"] } } }""");
         string personalPath = WritePersonalFile(
             home,
-            """{ "version": 1, "tasks": { "deploy": { "description": "Deploy to my box.", "command": "dotnet", "args": ["publish"], "dependsOn": ["build"] }, "scratch": { "command": "dotnet" } } }""");
+            $$"""{ "version": 1, "tasks": { "deploy": { "description": "Deploy to my box.", "command": "dotnet", "args": ["publish"], "dependsOn": [{{dependency}}] }, "scratch": { "command": "dotnet" } } }""");
 
         RecordingProcessRunner processRunner = new();
         StringWriter listOutput = new();
@@ -126,6 +128,7 @@ public sealed class PersonalTasksTests
         string[] lines = listOutput.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal((0, 0), (runExitCode, listExitCode));
         Assert.Equal(["build", "deploy"], processRunner.Requests.Select(static request => request.TaskName));
+        Assert.Equal(hasArguments ? ["build", "--configuration", "Release"] : ["build"], processRunner.Requests[0].Arguments);
         Assert.Equal(
             [
                 "build    Build it.",
@@ -136,15 +139,17 @@ public sealed class PersonalTasksTests
             lines);
     }
 
-    [Fact]
-    public async Task ConflictsBetweenRepoAndPersonalTasksAreErrors()
+    [Theory]
+    [InlineData("\"mine\"")]
+    [InlineData("{\"task\":\"mine\",\"args\":[\"--standby\"]}")]
+    public async Task ConflictsBetweenRepoAndPersonalTasksAreErrors(string dependency)
     {
         using TempDirectory tempDirectory = new();
         string home = System.IO.Path.Combine(tempDirectory.Path, "home");
         string root = CreateRepo(tempDirectory.Path, "repo");
         string repoPath = WriteRepoConfig(
             root,
-            """{ "version": 1, "tasks": { "build": { "command": "dotnet" }, "ci": { "dependsOn": ["mine"] } } }""");
+            $$"""{ "version": 1, "tasks": { "build": { "command": "dotnet" }, "ci": { "dependsOn": [{{dependency}}] } } }""");
         string personalPath = WritePersonalFile(
             home,
             """{ "version": 1, "tasks": { "build": { "command": "dotnet" }, "mine": { "command": "dotnet" }, "broken": { "command": "" } } }""");
@@ -309,8 +314,10 @@ public sealed class PersonalTasksTests
         Assert.Equal("gh", request.FileName);
     }
 
-    [Fact]
-    public async Task BroadTasksWithMissingDependenciesAreHiddenAndExplained()
+    [Theory]
+    [InlineData("\"test\"")]
+    [InlineData("{\"task\":\"test\",\"args\":[\"--filter\",\"Smoke\"]}")]
+    public async Task BroadTasksWithMissingDependenciesAreHiddenAndExplained(string dependency)
     {
         using TempDirectory tempDirectory = new();
         string home = System.IO.Path.Combine(tempDirectory.Path, "home");
@@ -320,7 +327,7 @@ public sealed class PersonalTasksTests
         WriteRepoConfig(complete, """{ "version": 1, "tasks": { "build": { "command": "dotnet" }, "test": { "command": "dotnet" } } }""");
         string globalPath = WriteFile(
             System.IO.Path.Combine(home, "global.json"),
-            """{ "version": 1, "tasks": { "ship": { "command": "gh", "dependsOn": ["build", "test"] }, "announce": { "command": "gh", "dependsOn": ["ship"] } } }""");
+            $$"""{ "version": 1, "tasks": { "ship": { "command": "gh", "dependsOn": ["build", {{dependency}}] }, "announce": { "command": "gh", "dependsOn": ["ship"] } } }""");
 
         StringWriter partialList = new();
         StringWriter shipError = new();

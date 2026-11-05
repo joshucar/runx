@@ -52,7 +52,7 @@ public sealed class AgentFeaturesTests
             ScriptTask task = Assert.Single(ScriptTasks.Discover(root, [System.IO.Path.Combine(root, "eng", "tasks")], OperatingSystem.IsWindows()));
             Assert.Equal("db:seed", task.Name);
             Assert.Equal("Seed \"it\" C:\\data", task.Task.Description);
-            Assert.Equal(["build"], task.Task.DependsOn);
+            Assert.Equal(["build"], task.Task.DependsOn!.Select(static dependency => dependency!.Task));
             Assert.True(task.Task.Hide);
         }
     }

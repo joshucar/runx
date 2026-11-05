@@ -38,13 +38,14 @@ Rules for script tasks:
   language (`#` for ps1 and sh, `//` for cs, `::` or `REM` for cmd):
 
       // runx description="Seed the local database"
-      // runx depends=["build"]
+      // runx depends=["build", { task: "test", args: ["--filter", "Smoke"] }]
       // runx hide=true
 
   `description` shows in the picker and `--list`. `depends` names tasks to run
   first. `hide=true` keeps a helper task out of the picker and `--list`; it
   still runs by name and as a dependency. Values are quoted strings, `true` or
-  `false`, or lists such as `["build", "test"]`.
+  `false`, or lists. Dependency entries can be task names or objects with
+  `task` and optional fixed `args`. Object keys may be quoted or unquoted.
 - C# scripts can reference packages with `#:package Name@Version` lines after
   the header. The repo's `Directory.Build.props` applies to them, so keep them
   free of warnings.
@@ -71,6 +72,20 @@ Unknown properties are errors. A `runx.json` task wins over a script with the
 same name. `"taskFolders": ["build/tasks"]` at the top level moves the task
 folder.
 
+To call a dependency with fixed arguments, use
+`"dependsOn": [{ "task": "prod:deploy", "args": ["--standby"] }]`.
+These strings are appended to the dependency's configured arguments, just as
+with `runx prod:deploy -- --standby`. runx does not interpret the options or
+forward them to further dependencies. Only command tasks and discovered script
+tasks accept arguments; inline shell tasks and dependency-only tasks do not.
+Each task runs once per invocation. Repeated calls with identical arguments
+share that run; conflicting arguments are errors before anything executes.
+Use distinct task names when you need separate invocations.
+
+Tasks with dependencies get numbered step headers and a final summary of
+durations and statuses, including failed, interrupted, and skipped steps. The
+runner writes these messages to stderr; child output goes directly to the console.
+
 ## Personal tasks
 
 Personal task files use the same format as `runx.json` and live under
@@ -85,7 +100,8 @@ Personal tasks run from the repo root and can depend on the repo's tasks.
 - `runx --check` validates everything without running anything, and warns
   about scripts that were skipped or have header mistakes.
 - `runx --info <task>` shows what a task runs, where it comes from, and the
-  order its dependencies run in.
+  order its dependencies run in, including fixed dependency arguments.
 - `runx --list --json` and `runx --info <task> --json` give machine-readable
-  output.
+  output. In `--info --json`, `plan` lists task names and `steps` lists each
+  task with its appended dependency `args`.
 - `runx --dry-run <task>` prints the exact commands without running them.

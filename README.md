@@ -12,7 +12,7 @@ PowerShell tasks also require [PowerShell 7](https://aka.ms/powershell).
 Install the beta from NuGet:
 
 ```powershell
-dotnet tool install --global MysterNybble.Runx --version 1.0.0-beta.1
+dotnet tool install --global MysterNybble.Runx --version 1.0.0-beta.2
 ```
 
 Update to the latest version, including betas:
@@ -91,6 +91,7 @@ Optional task properties:
   dependencies run first too, and each task runs at most once. The run stops at
   the first task that fails, and Ctrl+C stops it even if the interrupted task
   exits cleanly. Cycles and unknown task names are config errors.
+  Entries can be task names or objects with `task` and fixed `args`, as below.
 - `cwd`: working directory, relative to the directory containing `runx.json`.
   Defaults to that directory.
 - `env`: environment variables added to the task's process.
@@ -98,11 +99,37 @@ Optional task properties:
 Unknown properties are errors. The JSON schema lives in
 [`schemas/v1/runx.schema.json`](schemas/v1/runx.schema.json).
 
+To invoke a dependency with fixed arguments, use an object in `dependsOn`:
+
+```json
+"prod:release": {
+  "dependsOn": [
+    "prod:build",
+    { "task": "prod:deploy", "args": ["--standby"] }
+  ]
+}
+```
+
+The arguments are appended to `prod:deploy`'s configured arguments, just as
+with `runx prod:deploy -- --standby`. They apply only to this dependency call,
+not to its dependencies or to other callers. runx passes the strings through
+without interpreting options. This works for command tasks and discovered
+script tasks; inline shell tasks and dependency-only tasks do not accept
+arguments. Calls to the same task with identical arguments run once. Conflicting
+arguments in a dependency graph are rejected before any task runs; use distinct
+task names when separate invocations are needed.
+
 Tasks run attached to the current console, so colors, progress output, and
 prompts behave as if the command were run directly. `runx` exits with the task's
 exit code. On Windows, `.cmd` and `.bat` commands receive their arguments
 escaped for `cmd.exe`, so characters such as `&`, `|`, `%`, and `"` arrive
 intact instead of being interpreted.
+
+For a task with dependencies, runx prints numbered step headers and a final
+summary with each step's elapsed time and status (`OK`, `FAILED`, `INTERRUPTED`,
+or `SKIPPED`), plus the total elapsed time. These messages go to stderr, leaving
+the tasks' stdout available for piping. A task without dependencies runs without
+these extra messages.
 
 ## For People and AI Agents
 
@@ -198,14 +225,16 @@ eng/tasks/
 
   ```powershell
   # runx description="Pack the NuGet packages"
-  # runx depends=["build"]
+  # runx depends=["build", { task: "test", args: ["--filter", "Smoke"] }]
   # runx hide=true
   ```
 
   `description` shows in the picker, `depends` works like `dependsOn`, and
   `hide` keeps the task out of the picker and `--list` while it still runs by
   name and as a dependency. Values are quoted strings, `true` or `false`, or
-  `["a", "b"]` lists.
+  lists. Dependency lists accept task names and objects with `task` and optional
+  `args`, with the same behavior as `dependsOn`. Object keys may be quoted, as
+  in JSON, or unquoted as above.
 - Script tasks are marked `(script)`. A task in `runx.json` with the same name
   wins, which lets `runx.json` wrap a script.
 
@@ -350,8 +379,8 @@ Once the policy is configured and the release commit is tested, push a tag
 matching the version in the project file:
 
 ```powershell
-git tag v1.0.0-beta.1
-git push origin v1.0.0-beta.1
+git tag v1.0.0-beta.2
+git push origin v1.0.0-beta.2
 ```
 
 The tag run checks that the version and tag match, publishes the verified

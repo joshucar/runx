@@ -35,10 +35,10 @@ public sealed class ScriptTasksTests
             .ToDictionary(static task => task.Name, static task => task.Task);
 
         Assert.Equal("Pack \"it\"", tasks["pack"].Description);
-        Assert.Equal(["build", "test"], tasks["pack"].DependsOn);
+        Assert.Equal(["build", "test"], tasks["pack"].DependsOn!.Select(static dependency => dependency!.Task));
         Assert.True(tasks["pack"].Hide);
         Assert.Equal("Deploy C:\\temp", tasks["deploy"].Description);
-        Assert.Equal(["pack"], tasks["deploy"].DependsOn);
+        Assert.Equal(["pack"], tasks["deploy"].DependsOn!.Select(static dependency => dependency!.Task));
         Assert.Null(tasks["deploy"].Hide);
         Assert.Equal("Say hello", tasks["hello"].Description);
     }
@@ -135,6 +135,88 @@ public sealed class ScriptTasksTests
         Assert.False(ScriptTasks.TryParseValue("unquoted", out _));
         Assert.False(ScriptTasks.TryParseValue("\"unterminated", out _));
         Assert.False(ScriptTasks.TryParseValue("[\"a\", 1]", out _));
+    }
+
+    [Theory]
+    [InlineData("#", "ps1")]
+    [InlineData("//", "cs")]
+    [InlineData("::", "cmd")]
+    [InlineData("REM", "bat")]
+    public void HeadersAcceptMixedDependencyEntries(string marker, string extension)
+    {
+        using TempDirectory directory = new();
+        WriteScript(directory.Path, $"release.{extension}", $$"""
+            {{marker}} runx depends=["build", { task: 'prod:deploy', args: ["--standby", "two words", "", "a\"b", 'C:\path'] }, { "args": [], "task": "verify" }]
+            """);
+        List<string> warnings = [];
+
+        ScriptTask script = Assert.Single(ScriptTasks.Discover(directory.Path, [directory.Path], isWindows: true, warnings));
+
+        Assert.Empty(warnings);
+        Assert.Equal(["build", "prod:deploy", "verify"], script.Task.DependsOn!.Select(static dependency => dependency!.Task));
+        Assert.Equal(["--standby", "two words", "", "a\"b", "C:\\path"], script.Task.DependsOn![1]!.Args);
+        Assert.Empty(script.Task.DependsOn![2]!.Args);
+        Assert.Contains("prod:deploy -- --standby \"two words\" \"\" \"a\\\"b\" C:\\path", TaskPreview.FormatDetails(script.Task));
+    }
+
+    [Theory]
+    [InlineData("[{task: 'deploy', args: [1]}]")]
+    [InlineData("[{task: 'deploy', args: 'x'}]")]
+    [InlineData("[{task: 'deploy', forward: true}]")]
+    [InlineData("[{args: ['x']}]")]
+    [InlineData("[{task: 'deploy', task: 'other'}]")]
+    [InlineData("[{task: 'deploy', args: [], args: ['x']}]")]
+    [InlineData("[{task: 'deploy' args: ['x']}]")]
+    [InlineData("[{task: 'deploy', args: ['x' 'y']}]")]
+    [InlineData("[{task: 'deploy', args: ['unterminated]}]")]
+    [InlineData("[{task: 'deploy', args: ['x']}")]
+    public void InvalidDependencyObjectsProduceHeaderWarnings(string value)
+    {
+        using TempDirectory directory = new();
+        WriteScript(directory.Path, "release.ps1", $"# runx depends={value}");
+        List<string> warnings = [];
+
+        ScriptTasks.Discover(directory.Path, [directory.Path], isWindows: true, warnings);
+
+        Assert.Contains("header value for 'depends'", Assert.Single(warnings));
+    }
+
+    [Fact]
+    public async Task ScriptDependencyArgumentsAreUsedInTheExecutionPlan()
+    {
+        using TempDirectory directory = new();
+        string root = CreateRepo(directory.Path);
+        string folder = System.IO.Path.Combine(root, "eng", "tasks");
+        WriteScript(folder, "release.ps1", "# runx depends=[{ task: 'deploy', args: ['--standby', 'two words'] }]\n");
+        WriteScript(folder, "deploy.ps1", "# runx depends=['build']\n");
+        WriteScript(folder, "build.ps1");
+        RecordingProcessRunner runner = new();
+
+        int code = await RunAsync(["release", "--", "--yes"], root, runner);
+
+        Assert.Equal(0, code);
+        Assert.Equal(["build", "deploy", "release"], runner.Requests.Select(static request => request.TaskName));
+        Assert.Equal(["-NoLogo", "-NoProfile", "-File", "eng/tasks/deploy.ps1", "--standby", "two words"], runner.Requests[1].Arguments);
+        Assert.Equal("--yes", runner.Requests[2].Arguments[^1]);
+        Assert.DoesNotContain("--yes", runner.Requests[1].Arguments);
+    }
+
+    [Fact]
+    public async Task ScriptDependencyArgumentsRejectNulBeforeRunning()
+    {
+        using TempDirectory directory = new();
+        string root = CreateRepo(directory.Path);
+        string folder = System.IO.Path.Combine(root, "eng", "tasks");
+        WriteScript(folder, "release.ps1", "# runx depends=[{ task: 'deploy', args: [\"a\\u0000b\"] }]\n");
+        WriteScript(folder, "deploy.ps1");
+        StringWriter error = new();
+        RecordingProcessRunner runner = new();
+
+        int code = await RunAsync(["release"], root, runner, error: error);
+
+        Assert.Equal(1, code);
+        Assert.Contains("must not contain NUL", error.ToString());
+        Assert.Empty(runner.Requests);
     }
 
     [Fact]

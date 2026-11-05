@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using Spectre.Console;
 
@@ -250,8 +251,9 @@ internal static class RunxCli
         }
 
         List<ProcessRequest> requests = [];
-        foreach (string stepName in TaskPlanner.GetExecutionOrder(loadResult.Config.Tasks, taskName))
+        foreach (TaskDependency step in TaskPlanner.Build(loadResult.Config.Tasks, taskName).Steps)
         {
+            string stepName = step.Task;
             RunxTask stepTask = loadResult.Config.Tasks[stepName];
             if (!ProcessRequestFactory.IsRunnable(stepTask))
             {
@@ -262,7 +264,7 @@ internal static class RunxCli
                 loadResult.Config,
                 stepName,
                 stepTask,
-                stepName == taskName ? parseResult.TaskArguments : []);
+                stepName == taskName ? parseResult.TaskArguments : step.Args);
 
             if (requestResult.Errors.Count > 0 || requestResult.Request is null)
             {
@@ -283,42 +285,64 @@ internal static class RunxCli
             return 0;
         }
 
-        return await RunStepsAsync(requests, processRunner, error, cancellationToken);
+        return await RunStepsAsync(requests, processRunner, error, task.DependsOn is { Count: > 0 }, cancellationToken);
     }
 
     private static async Task<int> RunStepsAsync(
         List<ProcessRequest> requests,
         IProcessRunner processRunner,
         TextWriter error,
+        bool reportSteps,
         CancellationToken cancellationToken)
     {
-        if (requests.Count == 1)
+        if (!reportSteps && requests.Count == 1)
         {
             ProcessResult result = await processRunner.RunAsync(requests[0], error, cancellationToken);
             return result.ExitCode;
         }
 
-        for (int i = 0; i < requests.Count; i++)
+        TaskRunSummary summary = new(requests);
+        try
         {
-            ProcessRequest request = requests[i];
-            error.WriteLine($"> runx {request.TaskName} ({i + 1}/{requests.Count})");
-
-            ProcessResult result = await processRunner.RunAsync(request, error, cancellationToken);
-            if (result.Interrupted && i < requests.Count - 1)
+            for (int i = 0; i < requests.Count; i++)
             {
-                // The child may exit cleanly on Ctrl+C, but the user still asked for the run to stop.
-                error.WriteLine($"Interrupted during task '{request.TaskName}'. Remaining tasks were skipped.");
-                return result.ExitCode == 0 ? CancelledExitCode : result.ExitCode;
+                cancellationToken.ThrowIfCancellationRequested();
+                ProcessRequest request = requests[i];
+                error.WriteLine($"> runx {request.TaskName} ({i + 1}/{requests.Count})");
+
+                long started = Stopwatch.GetTimestamp();
+                ProcessResult result;
+                try
+                {
+                    result = await processRunner.RunAsync(request, error, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    summary.Add(new ProcessResult(CancelledExitCode, Interrupted: true), Stopwatch.GetElapsedTime(started));
+                    throw;
+                }
+
+                summary.Add(result, Stopwatch.GetElapsedTime(started));
+                if (result.Interrupted && i < requests.Count - 1)
+                {
+                    // The child may exit cleanly on Ctrl+C, but the user still asked for the run to stop.
+                    error.WriteLine($"Interrupted during task '{request.TaskName}'. Remaining tasks were skipped.");
+                    return result.ExitCode == 0 ? CancelledExitCode : result.ExitCode;
+                }
+
+                if (result.ExitCode != 0)
+                {
+                    error.WriteLine($"Task '{request.TaskName}' failed with exit code {result.ExitCode}.");
+                    return result.ExitCode;
+                }
             }
 
-            if (result.ExitCode != 0)
-            {
-                error.WriteLine($"Task '{request.TaskName}' failed with exit code {result.ExitCode}.");
-                return result.ExitCode;
-            }
+            return 0;
         }
-
-        return 0;
+        finally
+        {
+            summary.Write(error);
+        }
     }
 
     private static void WriteHelp(TextWriter output)

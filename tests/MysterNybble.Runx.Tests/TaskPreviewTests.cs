@@ -31,7 +31,7 @@ public sealed class TaskPreviewTests
         Assert.Equal("cwd: src/App   env: A, TOKEN", TaskPreview.FormatDetails(task));
         Assert.Equal(
             "depends on: build, lint",
-            TaskPreview.FormatDetails(new RunxTask { DependsOn = ["build", "lint"] }));
+            TaskPreview.FormatDetails(new RunxTask { DependsOn = [new("build"), new("lint")] }));
         Assert.Null(TaskPreview.FormatDetails(new RunxTask { Command = "dotnet" }));
     }
 }

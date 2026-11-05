@@ -9,7 +9,7 @@
     <IsTestProject>false</IsTestProject>
     <ToolCommandName>runx</ToolCommandName>
     <PackageId>MysterNybble.Runx</PackageId>
-    <Version>1.0.0-beta.1</Version>
+    <Version>1.0.0-beta.2</Version>
     <Authors>MysterNybble</Authors>
     <Description>A repo command runner for .NET projects.</Description>
     <PackageProjectUrl>https://github.com/joshucar/runx</PackageProjectUrl>

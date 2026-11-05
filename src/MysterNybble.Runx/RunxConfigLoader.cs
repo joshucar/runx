@@ -169,7 +169,7 @@ internal static class RunxConfigLoader
             {
                 TaskSource source = sources[task.Key];
                 string? missing = source.IsBroad
-                    ? task.Value?.DependsOn?.FirstOrDefault(dependency => dependency is not null && !tasks.ContainsKey(dependency))
+                    ? task.Value?.DependsOn?.FirstOrDefault(dependency => dependency is not null && !tasks.ContainsKey(dependency.Task))?.Task
                     : null;
 
                 if (missing is null)

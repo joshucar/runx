@@ -34,7 +34,7 @@ internal sealed class RunxTask
 
     public Dictionary<string, string?>? Env { get; set; }
 
-    public List<string?>? DependsOn { get; set; }
+    public List<TaskDependency?>? DependsOn { get; set; }
 
     public bool? Hide { get; set; }
 
@@ -88,4 +88,5 @@ internal sealed record LoadedRunxConfig(
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     WriteIndented = true)]
 [JsonSerializable(typeof(RunxConfig))]
+[JsonSerializable(typeof(TaskDependency))]
 internal sealed partial class RunxJsonSerializerContext : JsonSerializerContext;

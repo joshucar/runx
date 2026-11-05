@@ -21,6 +21,8 @@ internal sealed class RecordingProcessRunner : IProcessRunner
 
     public int ExitCode { get; set; }
 
+    public Dictionary<string, int> TaskExitCodes { get; } = new(StringComparer.Ordinal);
+
     public string? InterruptedTaskName { get; init; }
 
     public Task<ProcessResult> RunAsync(
@@ -29,7 +31,7 @@ internal sealed class RecordingProcessRunner : IProcessRunner
         CancellationToken cancellationToken)
     {
         Requests.Add(request);
-        return Task.FromResult(new ProcessResult(ExitCode, request.TaskName == InterruptedTaskName));
+        return Task.FromResult(new ProcessResult(TaskExitCodes.GetValueOrDefault(request.TaskName, ExitCode), request.TaskName == InterruptedTaskName));
     }
 }
 

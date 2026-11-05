@@ -59,20 +59,29 @@ internal static class RunxConfigValidator
         List<string> errors = [];
         foreach (KeyValuePair<string, RunxTask> task in tasks)
         {
-            foreach (string? dependency in task.Value?.DependsOn ?? [])
+            if (sources[task.Key].IsScript && task.Value?.DependsOn is { Count: > 0 } scriptDependencies)
+            {
+                ValidateDependsOn(task.Key, scriptDependencies, errors);
+            }
+
+            foreach (TaskDependency? dependency in task.Value?.DependsOn ?? [])
             {
                 if (dependency is null)
                 {
                     continue;
                 }
 
-                if (!tasks.ContainsKey(dependency))
+                if (!tasks.TryGetValue(dependency.Task, out RunxTask? target))
                 {
-                    errors.Add($"Task '{task.Key}' depends on unknown task '{dependency}'.");
+                    errors.Add($"Task '{task.Key}' depends on unknown task '{dependency.Task}'.");
                 }
-                else if (!sources[task.Key].IsPersonal && sources[dependency].IsPersonal)
+                else if (!sources[task.Key].IsPersonal && sources[dependency.Task].IsPersonal)
                 {
-                    errors.Add($"Task '{task.Key}' in {sources[task.Key].ConfigPath} cannot depend on personal task '{dependency}'.");
+                    errors.Add($"Task '{task.Key}' in {sources[task.Key].ConfigPath} cannot depend on personal task '{dependency.Task}'.");
+                }
+                else if (dependency.Args.Count > 0 && target?.Command is null)
+                {
+                    errors.Add($"Task '{task.Key}' supplies arguments to dependency '{dependency.Task}', but only command tasks and discovered script tasks accept arguments.");
                 }
             }
         }
@@ -80,6 +89,13 @@ internal static class RunxConfigValidator
         if (checkCycles && errors.Count == 0)
         {
             AddDependencyCycleErrors(tasks, errors);
+            if (errors.Count == 0)
+            {
+                foreach (string taskName in tasks.Keys.Order(StringComparer.Ordinal))
+                {
+                    errors.AddRange(TaskPlanner.Build(tasks, taskName).Errors);
+                }
+            }
         }
 
         return errors;
@@ -276,7 +292,7 @@ internal static class RunxConfigValidator
         }
     }
 
-    private static void ValidateDependsOn(string taskName, List<string?>? dependsOn, List<string> errors)
+    private static void ValidateDependsOn(string taskName, List<TaskDependency?>? dependsOn, List<string> errors)
     {
         if (dependsOn is null)
         {
@@ -292,14 +308,22 @@ internal static class RunxConfigValidator
         HashSet<string> seen = new(StringComparer.Ordinal);
         for (int i = 0; i < dependsOn.Count; i++)
         {
-            string? dependency = dependsOn[i];
+            TaskDependency? dependency = dependsOn[i];
             if (dependency is null)
             {
-                errors.Add($"Task '{taskName}' dependsOn[{i}] must be a string.");
+                errors.Add($"Task '{taskName}' dependsOn[{i}] must be a task name or an object with 'task' and optional 'args'.");
             }
-            else if (!seen.Add(dependency))
+            else
             {
-                errors.Add($"Task '{taskName}' lists '{dependency}' in dependsOn more than once.");
+                if (!seen.Add(dependency.Task))
+                {
+                    errors.Add($"Task '{taskName}' lists '{dependency.Task}' in dependsOn more than once.");
+                }
+
+                for (int j = 0; j < dependency.Args.Count; j++)
+                {
+                    AddNulCharacterError(taskName, $"dependsOn[{i}].args[{j}]", dependency.Args[j], errors);
+                }
             }
         }
     }
@@ -330,9 +354,9 @@ internal static class RunxConfigValidator
             }
 
             path.Add(taskName);
-            foreach (string? dependency in tasks[taskName].DependsOn ?? [])
+            foreach (TaskDependency? dependency in tasks[taskName].DependsOn ?? [])
             {
-                Visit(dependency!);
+                Visit(dependency!.Task);
             }
 
             path.RemoveAt(path.Count - 1);

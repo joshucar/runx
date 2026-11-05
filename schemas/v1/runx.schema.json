@@ -33,6 +33,24 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9_.:][A-Za-z0-9_.:-]*$"
     },
+    "dependency": {
+      "oneOf": [
+        { "$ref": "#/$defs/taskName" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["task"],
+          "properties": {
+            "task": { "$ref": "#/$defs/taskName" },
+            "args": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Fixed arguments appended to this dependency's configured arguments. Supported for command tasks and discovered script tasks; not forwarded to further dependencies."
+            }
+          }
+        }
+      ]
+    },
     "task": {
       "type": "object",
       "additionalProperties": false,
@@ -79,8 +97,8 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/taskName" },
-          "description": "Tasks to run first, in order. Each task runs at most once per invocation. A task with only 'dependsOn' just runs its dependencies."
+          "items": { "$ref": "#/$defs/dependency" },
+          "description": "Tasks to run first, in order: task names or objects with task and optional args. Each task runs at most once per invocation; conflicting arguments to the same task are errors. A task with only 'dependsOn' just runs its dependencies."
         }
       },
       "oneOf": [

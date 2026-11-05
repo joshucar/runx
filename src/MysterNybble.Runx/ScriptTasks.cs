@@ -212,9 +212,9 @@ internal static class ScriptTasks
             warnings?.Add($"{displayPath}: the header 'description' must be a quoted string.");
         }
 
-        if (depends is not (null or string or List<string>))
+        if (depends is not (null or string or List<string> or List<TaskDependency>))
         {
-            warnings?.Add($"{displayPath}: the header 'depends' must be a quoted task name or a list such as [\"build\", \"test\"].");
+            warnings?.Add($"{displayPath}: the header 'depends' must be a quoted task name or a list of task names and objects with 'task' and 'args'.");
         }
 
         if (hide is not (null or bool))
@@ -229,8 +229,9 @@ internal static class ScriptTasks
             Args = [.. runner.Arguments],
             DependsOn = depends switch
             {
-                string dependency => [dependency],
-                List<string> dependencies => [.. dependencies],
+                string dependency => [new TaskDependency(dependency)],
+                List<string> dependencies => [.. dependencies.Select(static name => new TaskDependency(name))],
+                List<TaskDependency> dependencies => [.. dependencies],
                 _ => null
             },
             Hide = hide as bool?
@@ -361,27 +362,40 @@ internal static class ScriptTasks
         int position = 0;
         if (text.StartsWith('['))
         {
-            List<string> items = [];
+            List<TaskDependency> items = [];
+            bool hasObjects = false;
             position = 1;
             while (true)
             {
                 SkipWhitespace(text, ref position);
                 if (position < text.Length && text[position] == ']')
                 {
-                    value = items;
+                    value = hasObjects ? items : items.Select(static item => item.Task).ToList();
                     return true;
                 }
 
-                if (!TryParseString(text, ref position, out string? item))
+                if (TryParseString(text, ref position, out string? item))
+                {
+                    items.Add(new TaskDependency(item));
+                }
+                else if (TryParseDependencyObject(text, ref position, out TaskDependency? dependency))
+                {
+                    items.Add(dependency!);
+                    hasObjects = true;
+                }
+                else
                 {
                     return false;
                 }
 
-                items.Add(item);
                 SkipWhitespace(text, ref position);
                 if (position < text.Length && text[position] == ',')
                 {
                     position++;
+                }
+                else if (position >= text.Length || text[position] != ']')
+                {
+                    return false;
                 }
             }
         }
@@ -393,6 +407,93 @@ internal static class ScriptTasks
         }
 
         return false;
+    }
+
+    // Dependency objects use JSON-like keys, optionally quoted, and the same strings as headers.
+    private static bool TryParseDependencyObject(string text, ref int position, out TaskDependency? dependency)
+    {
+        dependency = null;
+        if (!Consume(text, ref position, '{'))
+        {
+            return false;
+        }
+
+        string? task = null;
+        List<string> args = [];
+        HashSet<string> keys = new(StringComparer.Ordinal);
+        while (!Consume(text, ref position, '}'))
+        {
+            SkipWhitespace(text, ref position);
+            if (!TryParseString(text, ref position, out string key))
+            {
+                int start = position;
+                while (position < text.Length && char.IsAsciiLetter(text[position]))
+                {
+                    position++;
+                }
+
+                key = text[start..position];
+            }
+
+            if (!keys.Add(key) || !Consume(text, ref position, ':'))
+            {
+                return false;
+            }
+
+            SkipWhitespace(text, ref position);
+            if (key == "task")
+            {
+                if (!TryParseString(text, ref position, out task))
+                {
+                    return false;
+                }
+            }
+            else if (key == "args" && Consume(text, ref position, '['))
+            {
+                while (!Consume(text, ref position, ']'))
+                {
+                    if (!TryParseString(text, ref position, out string argument))
+                    {
+                        return false;
+                    }
+
+                    args.Add(argument);
+                    if (!Consume(text, ref position, ',') && (position >= text.Length || text[position] != ']'))
+                    {
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            if (!Consume(text, ref position, ',') && (position >= text.Length || text[position] != '}'))
+            {
+                return false;
+            }
+        }
+
+        if (task is null)
+        {
+            return false;
+        }
+
+        dependency = new TaskDependency(task, args);
+        return true;
+    }
+
+    private static bool Consume(string text, ref int position, char expected)
+    {
+        SkipWhitespace(text, ref position);
+        if (position >= text.Length || text[position] != expected)
+        {
+            return false;
+        }
+
+        position++;
+        return true;
     }
 
     private static bool TryParseString(string text, ref int position, out string value)
