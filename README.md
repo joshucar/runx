@@ -6,7 +6,7 @@ FAKE, MSBuild, or other heavier build systems.
 
 ## Install
 
-Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later.
 PowerShell tasks also require [PowerShell 7](https://aka.ms/powershell).
 
 Install the beta from NuGet:
